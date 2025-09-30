@@ -12,6 +12,7 @@
     NSUserDefaults* defaults;
     NSMutableDictionary* itemsToIDS;
     NSMenuItem *startupItem;
+    BOOL rebuildingMenu;
 }
 
 @property (weak) IBOutlet NSWindow *window;
@@ -46,13 +47,13 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     
     NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
     NSInteger readenId = [prefs integerForKey: @"Device"];
-    
+
     if (readenId == 0) {
         [prefs setInteger:UINT32_MAX forKey: @"Device"];
         [prefs synchronize];
     }
-    
-    forcedInputID = readenId;
+
+    forcedInputID = (AudioDeviceID)readenId;
     
     NSLog(@"Loaded device from UserDefaults: %d", forcedInputID);
 
@@ -60,8 +61,8 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     [ image setTemplate : YES ];
 
     statusItem = [ [ NSStatusBar systemStatusBar ] statusItemWithLength : NSVariableStatusItemLength ];
-    [ statusItem setToolTip : @"AirPods Audio Quality & Battery Life Fixer" ];
-    [ statusItem setImage : image ];
+    statusItem.button.toolTip = @"AirPods Audio Quality & Battery Life Fixer";
+    statusItem.button.image = image;
 
     // add listener for detecting when input device is changed
 
@@ -77,16 +78,17 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
         &callbackFunction,
         (__bridge  void* ) self );
 
-   AudioObjectPropertyAddress runLoopAddress = {
+    // Set the runloop to the main runloop for CoreAudio callbacks
+    AudioObjectPropertyAddress runLoopAddress = {
         kAudioHardwarePropertyRunLoop,
         kAudioObjectPropertyScopeGlobal,
         kAudioObjectPropertyElementMaster
     };
 
-    CFRunLoopRef runLoop = NULL;
-    
+    CFRunLoopRef runLoop = CFRunLoopGetCurrent();
+
     UInt32 size = sizeof(CFRunLoopRef);
-    
+
     AudioObjectSetPropertyData(
         kAudioObjectSystemObject,
         &runLoopAddress,
@@ -94,8 +96,8 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
         NULL,
         size,
         &runLoop);
-    
-     [ self listDevices ];
+
+    [ self listDevices ];
     
 }
 
@@ -119,19 +121,24 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
         [prefs synchronize];
         NSLog(@"Saved device from UserDefaults: %d", forcedInputID);
 
-        UInt32 propertySize = sizeof(UInt32);
-        AudioHardwareSetProperty(
-            kAudioHardwarePropertyDefaultInputDevice ,
-            propertySize ,
-            &forcedInputID );
-        
-        // show forcing
+        AudioObjectPropertyAddress propertyAddress = {
+            kAudioHardwarePropertyDefaultInputDevice,
+            kAudioObjectPropertyScopeGlobal,
+            kAudioObjectPropertyElementMaster
+        };
+        UInt32 propertySize = sizeof(AudioDeviceID);
+        AudioObjectSetPropertyData(
+            kAudioObjectSystemObject,
+            &propertyAddress,
+            0,
+            NULL,
+            propertySize,
+            &forcedInputID);
 
-        [ menu
-            insertItemWithTitle : @"forcing..."
-            action : NULL
-            keyEquivalent : @""
-            atIndex : 2 ];
+        // Rebuild menu to show updated selection
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self listDevices];
+        });
 
     }
     
@@ -140,6 +147,11 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 
 - ( void ) listDevices
 {
+    // Prevent recursive calls while rebuilding menu
+    if (rebuildingMenu) {
+        return;
+    }
+    rebuildingMenu = YES;
 
     NSDictionary *bundleInfo = [ [ NSBundle mainBundle] infoDictionary];
     NSString *versionString = [ NSString stringWithFormat : @"Version %@ (build %@)",
@@ -162,18 +174,29 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     [ menu addItemWithTitle : @"Forced input:" action : nil keyEquivalent : @"" ];
     
     UInt32 propertySize;
-    
+
     AudioDeviceID dev_array[64];
     int numberOfDevices = 0;
     char deviceName[256];
-    
-    AudioHardwareGetPropertyInfo(
+
+    AudioObjectPropertyAddress devicesAddress = {
         kAudioHardwarePropertyDevices,
-        &propertySize,
-        NULL );
-    
-    AudioHardwareGetProperty(
-        kAudioHardwarePropertyDevices,
+        kAudioObjectPropertyScopeGlobal,
+        kAudioObjectPropertyElementMaster
+    };
+
+    AudioObjectGetPropertyDataSize(
+        kAudioObjectSystemObject,
+        &devicesAddress,
+        0,
+        NULL,
+        &propertySize);
+
+    AudioObjectGetPropertyData(
+        kAudioObjectSystemObject,
+        &devicesAddress,
+        0,
+        NULL,
         &propertySize,
         dev_array);
     
@@ -213,14 +236,19 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
         AudioDeviceID oneDeviceID = dev_array[ index ];
 
         propertySize = 256;
-        
-        AudioDeviceGetPropertyInfo(
-            oneDeviceID ,
-            0 ,
-            true ,
-            kAudioDevicePropertyStreams ,
-            &propertySize ,
-            NULL );
+
+        AudioObjectPropertyAddress streamsAddress = {
+            kAudioDevicePropertyStreams,
+            kAudioDevicePropertyScopeInput,
+            kAudioObjectPropertyElementMaster
+        };
+
+        AudioObjectGetPropertyDataSize(
+            oneDeviceID,
+            &streamsAddress,
+            0,
+            NULL,
+            &propertySize);
 
         // if there are any input streams, then it is an input
 
@@ -230,14 +258,20 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
             // get name
 
             propertySize = 256;
-            
-            AudioDeviceGetProperty(
-                oneDeviceID ,
-                0 ,
-                false ,
-                kAudioDevicePropertyDeviceName ,
-                &propertySize ,
-                deviceName );
+
+            AudioObjectPropertyAddress nameAddress = {
+                kAudioDevicePropertyDeviceName,
+                kAudioObjectPropertyScopeGlobal,
+                kAudioObjectPropertyElementMaster
+            };
+
+            AudioObjectGetPropertyData(
+                oneDeviceID,
+                &nameAddress,
+                0,
+                NULL,
+                &propertySize,
+                deviceName);
 
             NSLog( @"found input device : %s  %u\n" , deviceName , (unsigned int)oneDeviceID );
             
@@ -274,16 +308,25 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     }
 
     // get current input device
-    
+
     AudioDeviceID deviceID = kAudioDeviceUnknown;
 
     // get the default output device
     // if it is not the built in, change
-    
+
     propertySize = sizeof( deviceID );
-    
-    AudioHardwareGetProperty(
+
+    AudioObjectPropertyAddress defaultInputAddress = {
         kAudioHardwarePropertyDefaultInputDevice,
+        kAudioObjectPropertyScopeGlobal,
+        kAudioObjectPropertyElementMaster
+    };
+
+    AudioObjectGetPropertyData(
+        kAudioObjectSystemObject,
+        &defaultInputAddress,
+        0,
+        NULL,
         &propertySize,
         &deviceID);
     
@@ -294,19 +337,24 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 
         NSLog( @"forcing input device for default : %u" , forcedInputID );
 
-        UInt32 propertySize = sizeof(UInt32);
-        AudioHardwareSetProperty(
-            kAudioHardwarePropertyDefaultInputDevice ,
-            propertySize ,
-            &forcedInputID );
-        
-        // show forcing
+        AudioObjectPropertyAddress forceInputAddress = {
+            kAudioHardwarePropertyDefaultInputDevice,
+            kAudioObjectPropertyScopeGlobal,
+            kAudioObjectPropertyElementMaster
+        };
+        UInt32 propertySize = sizeof(AudioDeviceID);
+        AudioObjectSetPropertyData(
+            kAudioObjectSystemObject,
+            &forceInputAddress,
+            0,
+            NULL,
+            propertySize,
+            &forcedInputID);
 
-        [ menu
-            insertItemWithTitle : @"forcing..."
-            action : NULL
-            keyEquivalent : @""
-            atIndex : 2 ];
+        // Rebuild menu after forcing device
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self listDevices];
+        });
 
     }
     
@@ -335,6 +383,8 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     [ menu addItemWithTitle : @"Quit"
            action : @selector(terminate)
            keyEquivalent : @"" ];
+
+    rebuildingMenu = NO;
 
 }
 
