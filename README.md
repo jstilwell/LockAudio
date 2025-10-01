@@ -16,6 +16,6 @@ I will try to maintain this fork as long as I use the app or until Apple adds th
 - Signed release so the app can be installed without headaches
 - Added a build script to release .dmg files instead of .zip
 - Added full Mac Sequoia 15.x compatibility 
+- Added automatic updates
 - Squashed some bugs
-- Fixed some deprecation warnings
-- Added working automatic update feature.
+- Fixed all deprecation notices
