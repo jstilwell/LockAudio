@@ -12,6 +12,7 @@ I will try to maintain this fork as long as I use the app or until Apple adds th
 
 ## My Updates
 
-- Added a build script to release .dmg files instead of .zip
-- Added full Mac Sequoia 15.x compatibility with some additional bugfixes thrown in.
-- Added working automatic update feature.
+- Sign releases so the app can be installed without headaches
+- Add a build script to release .dmg files instead of .zip
+- Add full Mac Sequoia 15.x compatibility with some additional bugfixes thrown in.
+- Add working automatic update feature.
