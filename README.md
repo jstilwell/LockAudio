@@ -1,6 +1,6 @@
 # Mac Audio Input Locker
 
-This is a fork of the very useful AirPods Sound Quality Fixer And Battery Life Enhancer For MacOS by [milgra](https://github.com/milgra/) that they no longer maintain.
+This is a fork of the very useful AirPods Sound Quality Fixer And Battery Life Enhancer For MacOS by [milgra](https://github.com/milgra/) that they no longer maintain. I decided to change the name of the app because A) it was too long and B) it didn't make it clear what the best feature of the app was.
 
 I will try to maintain this fork as long as I use the app or until Apple adds their own feature to accomplish the same thing.
 
@@ -12,7 +12,10 @@ I will try to maintain this fork as long as I use the app or until Apple adds th
 
 ## My Updates
 
-- Sign releases so the app can be installed without headaches
-- Add a build script to release .dmg files instead of .zip
-- Add full Mac Sequoia 15.x compatibility with some additional bugfixes thrown in.
-- Add working automatic update feature.
+- Switched to semantic versioning
+- Signed release so the app can be installed without headaches
+- Added a build script to release .dmg files instead of .zip
+- Added full Mac Sequoia 15.x compatibility 
+- Squashed some bugs
+- Fixed some deprecation warnings
+- Added working automatic update feature.
