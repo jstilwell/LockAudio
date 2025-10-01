@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**AirPods Sound Quality Fixer** is a macOS menu bar application that improves AirPods sound quality and battery life by forcing the Mac to use the built-in microphone instead of AirPods' microphone. This prevents macOS from mixing down the audio output quality.
+**Mac Audio Input Locker** is a macOS menu bar application that improves AirPods sound quality and battery life by forcing the Mac to use the built-in microphone instead of AirPods' microphone. This prevents macOS from mixing down the audio output quality.
 
 ## Technology Stack
 
@@ -21,15 +21,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Building the application
 ```bash
 # Build from command line
-xcodebuild -project "AirPods Sound Quality Fixer.xcodeproj" -scheme "AirPods Sound Quality Fixer" -configuration Release build
+xcodebuild -project "Mac Audio Input Locker.xcodeproj" -scheme "Mac Audio Input Locker" -configuration Release build
 
 # Or open in Xcode
-open "AirPods Sound Quality Fixer.xcodeproj"
+open "Mac Audio Input Locker.xcodeproj"
 ```
 
 ### Clean build
 ```bash
-xcodebuild -project "AirPods Sound Quality Fixer.xcodeproj" -scheme "AirPods Sound Quality Fixer" clean
+xcodebuild -project "Mac Audio Input Locker.xcodeproj" -scheme "Mac Audio Input Locker" clean
 ```
 
 ## Architecture
@@ -81,7 +81,7 @@ xcodebuild -project "AirPods Sound Quality Fixer.xcodeproj" -scheme "AirPods Sou
 ## File Structure
 
 ```
-AirPods Sound Quality Fixer/
+Mac Audio Input Locker/
 ├── AppDelegate.h/m          # Main application controller
 ├── main.m                   # Entry point
 ├── Info.plist               # App metadata and configuration
@@ -102,7 +102,7 @@ GBLaunchAtLogin/
 - No unit tests present in project
 - Sandbox is disabled (com.apple.Sandbox = 0 in project.pbxproj)
 - Development team ID: SGKB9R23YT
-- Bundle identifier: com.milgra.asqf
+- Bundle identifier: com.audio.locker
 
 ## Code Patterns
 

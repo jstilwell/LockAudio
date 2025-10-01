@@ -16,6 +16,7 @@
 }
 
 @property (weak) IBOutlet NSWindow *window;
+@property (strong) SPUStandardUpdaterController *updaterController;
 
 @end
 
@@ -39,9 +40,11 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 
 - ( void ) applicationDidFinishLaunching : ( NSNotification* ) aNotification
 {
+    // Initialize Sparkle updater
+    self.updaterController = [[SPUStandardUpdaterController alloc] initWithStartingUpdater:YES updaterDelegate:nil userDriverDelegate:nil];
 
     defaults = [ NSUserDefaults standardUserDefaults ];
-    
+
     itemsToIDS = [ NSMutableDictionary dictionary ];
     
     
@@ -61,7 +64,7 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     [ image setTemplate : YES ];
 
     statusItem = [ [ NSStatusBar systemStatusBar ] statusItemWithLength : NSVariableStatusItemLength ];
-    statusItem.button.toolTip = @"AirPods Audio Quality & Battery Life Fixer";
+    statusItem.button.toolTip = @"Mac Audio Input Locker";
     statusItem.button.image = image;
 
     // add listener for detecting when input device is changed
@@ -69,7 +72,7 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     AudioObjectPropertyAddress inputDeviceAddress = {
         kAudioHardwarePropertyDefaultInputDevice,
         kAudioObjectPropertyScopeGlobal,
-        kAudioObjectPropertyElementMaster
+        kAudioObjectPropertyElementMain
     };
 
     AudioObjectAddPropertyListener(
@@ -82,7 +85,7 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     AudioObjectPropertyAddress runLoopAddress = {
         kAudioHardwarePropertyRunLoop,
         kAudioObjectPropertyScopeGlobal,
-        kAudioObjectPropertyElementMaster
+        kAudioObjectPropertyElementMain
     };
 
     CFRunLoopRef runLoop = CFRunLoopGetCurrent();
@@ -124,7 +127,7 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
         AudioObjectPropertyAddress propertyAddress = {
             kAudioHardwarePropertyDefaultInputDevice,
             kAudioObjectPropertyScopeGlobal,
-            kAudioObjectPropertyElementMaster
+            kAudioObjectPropertyElementMain
         };
         UInt32 propertySize = sizeof(AudioDeviceID);
         AudioObjectSetPropertyData(
@@ -154,9 +157,8 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     rebuildingMenu = YES;
 
     NSDictionary *bundleInfo = [ [ NSBundle mainBundle] infoDictionary];
-    NSString *versionString = [ NSString stringWithFormat : @"Version %@ (build %@)",
-                               bundleInfo[ @"CFBundleShortVersionString" ],
-                               bundleInfo[ @"CFBundleVersion"] ];
+    NSString *versionString = [ NSString stringWithFormat : @"Version %@",
+                               bundleInfo[ @"CFBundleShortVersionString" ] ];
 
     menu = [ [ NSMenu alloc ] init ];
     menu.delegate = self;
@@ -182,7 +184,7 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     AudioObjectPropertyAddress devicesAddress = {
         kAudioHardwarePropertyDevices,
         kAudioObjectPropertyScopeGlobal,
-        kAudioObjectPropertyElementMaster
+        kAudioObjectPropertyElementMain
     };
 
     AudioObjectGetPropertyDataSize(
@@ -240,7 +242,7 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
         AudioObjectPropertyAddress streamsAddress = {
             kAudioDevicePropertyStreams,
             kAudioDevicePropertyScopeInput,
-            kAudioObjectPropertyElementMaster
+            kAudioObjectPropertyElementMain
         };
 
         AudioObjectGetPropertyDataSize(
@@ -262,7 +264,7 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
             AudioObjectPropertyAddress nameAddress = {
                 kAudioDevicePropertyDeviceName,
                 kAudioObjectPropertyScopeGlobal,
-                kAudioObjectPropertyElementMaster
+                kAudioObjectPropertyElementMain
             };
 
             AudioObjectGetPropertyData(
@@ -319,7 +321,7 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     AudioObjectPropertyAddress defaultInputAddress = {
         kAudioHardwarePropertyDefaultInputDevice,
         kAudioObjectPropertyScopeGlobal,
-        kAudioObjectPropertyElementMaster
+        kAudioObjectPropertyElementMain
     };
 
     AudioObjectGetPropertyData(
@@ -340,7 +342,7 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
         AudioObjectPropertyAddress forceInputAddress = {
             kAudioHardwarePropertyDefaultInputDevice,
             kAudioObjectPropertyScopeGlobal,
-            kAudioObjectPropertyElementMaster
+            kAudioObjectPropertyElementMain
         };
         UInt32 propertySize = sizeof(AudioDeviceID);
         AudioObjectSetPropertyData(
@@ -366,11 +368,6 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
         keyEquivalent : @"" ];
     
     [ menu addItem : [ NSMenuItem separatorItem ] ]; // A thin grey line
-
-    [ menu addItem : [ NSMenuItem separatorItem ] ]; // A thin grey line
-    [ menu addItemWithTitle : @"Donate if you like the app"
-           action : @selector(support)
-           keyEquivalent : @"" ];
 
     [ menu addItemWithTitle : @"Check for updates"
            action : @selector(update)
@@ -399,14 +396,9 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     [ NSApp terminate : nil ];
 }
 
-- ( void ) support
-{
-    [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString: @"https://paypal.me/milgra"]];
-}
-
 - ( void ) update
 {
-    [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString: @"http://milgra.com/airpods-sound-quality-fixer.html"]];
+    [self.updaterController checkForUpdates:nil];
 }
 
 - ( void ) hide

@@ -16,10 +16,11 @@
 		335B96772199C07000F6D77B /* LICENSE in Resources */ = {isa = PBXBuildFile; fileRef = 335B96742199C07000F6D77B /* LICENSE */; };
 		335B96782199C07000F6D77B /* GBLaunchAtLogin.m in Sources */ = {isa = PBXBuildFile; fileRef = 335B96752199C07000F6D77B /* GBLaunchAtLogin.m */; };
 		335B96792199C07000F6D77B /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = 335B96762199C07000F6D77B /* README.md */; };
+		88CCA3E62E8C94FA0034FB1C /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 88CCA3E52E8C94FA0034FB1C /* Sparkle */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		3333F8A2219874D300816A9F /* AirPods Sound Quality Fixer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "AirPods Sound Quality Fixer.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		3333F8A2219874D300816A9F /* Mac Audio Input Locker.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Mac Audio Input Locker.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		3333F8A5219874D300816A9F /* AppDelegate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AppDelegate.h; sourceTree = "<group>"; };
 		3333F8A6219874D300816A9F /* AppDelegate.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = AppDelegate.m; sourceTree = "<group>"; };
 		3333F8A8219874D600816A9F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -42,6 +43,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				88CCA3E62E8C94FA0034FB1C /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -51,7 +53,7 @@
 		3333F899219874D300816A9F = {
 			isa = PBXGroup;
 			children = (
-				3333F8A4219874D300816A9F /* AirPods Sound Quality Fixer */,
+				3333F8A4219874D300816A9F /* Mac Audio Input Locker */,
 				3333F8A3219874D300816A9F /* Products */,
 				3333F8BA2198771700816A9F /* Frameworks */,
 			);
@@ -60,12 +62,12 @@
 		3333F8A3219874D300816A9F /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				3333F8A2219874D300816A9F /* AirPods Sound Quality Fixer.app */,
+				3333F8A2219874D300816A9F /* Mac Audio Input Locker.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
 		};
-		3333F8A4219874D300816A9F /* AirPods Sound Quality Fixer */ = {
+		3333F8A4219874D300816A9F /* Mac Audio Input Locker */ = {
 			isa = PBXGroup;
 			children = (
 				335B966F21988E6700F6D77B /* airpods-icon.png */,
@@ -79,7 +81,7 @@
 				335B967A2199C25A00F6D77B /* LICENSE */,
 				335B967B2199C25A00F6D77B /* README.md */,
 			);
-			path = "AirPods Sound Quality Fixer";
+			path = "Mac Audio Input Locker";
 			sourceTree = "<group>";
 		};
 		3333F8BA2198771700816A9F /* Frameworks */ = {
@@ -105,9 +107,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		3333F8A1219874D300816A9F /* AirPods Sound Quality Fixer */ = {
+		3333F8A1219874D300816A9F /* Mac Audio Input Locker */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 3333F8B3219874D600816A9F /* Build configuration list for PBXNativeTarget "AirPods Sound Quality Fixer" */;
+			buildConfigurationList = 3333F8B3219874D600816A9F /* Build configuration list for PBXNativeTarget "Mac Audio Input Locker" */;
 			buildPhases = (
 				3333F89E219874D300816A9F /* Sources */,
 				3333F89F219874D300816A9F /* Frameworks */,
@@ -117,9 +119,9 @@
 			);
 			dependencies = (
 			);
-			name = "AirPods Sound Quality Fixer";
-			productName = "AirPods Audio Quality Fixer";
-			productReference = 3333F8A2219874D300816A9F /* AirPods Sound Quality Fixer.app */;
+			name = "Mac Audio Input Locker";
+			productName = "Mac Audio Input Locker";
+			productReference = 3333F8A2219874D300816A9F /* Mac Audio Input Locker.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -142,7 +144,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 3333F89D219874D300816A9F /* Build configuration list for PBXProject "AirPods Sound Quality Fixer" */;
+			buildConfigurationList = 3333F89D219874D300816A9F /* Build configuration list for PBXProject "Mac Audio Input Locker" */;
 			compatibilityVersion = "Xcode 9.3";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -151,11 +153,14 @@
 				Base,
 			);
 			mainGroup = 3333F899219874D300816A9F;
+			packageReferences = (
+				88CCA3E42E8C94FA0034FB1C /* XCRemoteSwiftPackageReference "Sparkle" */,
+			);
 			productRefGroup = 3333F8A3219874D300816A9F /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				3333F8A1219874D300816A9F /* AirPods Sound Quality Fixer */,
+				3333F8A1219874D300816A9F /* Mac Audio Input Locker */,
 			);
 		};
 /* End PBXProject section */
@@ -331,13 +336,16 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEAD_CODE_STRIPPING = YES;
-				INFOPLIST_FILE = "AirPods Sound Quality Fixer/Info.plist";
+				INFOPLIST_FILE = "Mac Audio Input Locker/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Mac Audio Input Locker";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 11.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.milgra.asqf;
+				MACOSX_DEPLOYMENT_TARGET = 15.6;
+				MARKETING_VERSION = 1.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.audio.locker;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 			};
 			name = Debug;
@@ -349,13 +357,16 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEAD_CODE_STRIPPING = YES;
-				INFOPLIST_FILE = "AirPods Sound Quality Fixer/Info.plist";
+				INFOPLIST_FILE = "Mac Audio Input Locker/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Mac Audio Input Locker";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 11.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.milgra.asqf;
+				MACOSX_DEPLOYMENT_TARGET = 15.6;
+				MARKETING_VERSION = 1.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.audio.locker;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 			};
 			name = Release;
@@ -363,7 +374,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		3333F89D219874D300816A9F /* Build configuration list for PBXProject "AirPods Sound Quality Fixer" */ = {
+		3333F89D219874D300816A9F /* Build configuration list for PBXProject "Mac Audio Input Locker" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				3333F8B1219874D600816A9F /* Debug */,
@@ -372,7 +383,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		3333F8B3219874D600816A9F /* Build configuration list for PBXNativeTarget "AirPods Sound Quality Fixer" */ = {
+		3333F8B3219874D600816A9F /* Build configuration list for PBXNativeTarget "Mac Audio Input Locker" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				3333F8B4219874D600816A9F /* Debug */,
@@ -382,6 +393,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		88CCA3E42E8C94FA0034FB1C /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.8.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		88CCA3E52E8C94FA0034FB1C /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 88CCA3E42E8C94FA0034FB1C /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 3333F89A219874D300816A9F /* Project object */;
 }

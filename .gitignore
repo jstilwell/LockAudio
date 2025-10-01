@@ -2,9 +2,18 @@
 #
 # gitignore contributors: remember to update Global/Xcode.gitignore, Objective-C.gitignore & Swift.gitignore
 
+# App
+.DS_Store
+CLAUDE.md
+SPARKLE_SETUP.md
+appcast.xml
+bin/copy-appcast.sh
+release/
+
 ## Build generated
 build/
 DerivedData/
+release/
 
 ## Various settings
 *.pbxuser
@@ -61,5 +70,5 @@ fastlane/test_output
 # https://github.com/johnno1962/injectionforxcode
 
 iOSInjectionProject/
-AirPods Sound Quality Fixer.xcodeproj/project.xcworkspace/
-AirPods Sound Quality Fixer.xcodeproj/xcshareddata/
+Mac Audio Input Locker.xcodeproj/project.xcworkspace/
+Mac Audio Input Locker.xcodeproj/xcshareddata/
