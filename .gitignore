@@ -69,5 +69,3 @@ fastlane/test_output
 # https://github.com/johnno1962/injectionforxcode
 
 iOSInjectionProject/
-Mac Audio Input Locker.xcodeproj/project.xcworkspace/
-Mac Audio Input Locker.xcodeproj/xcshareddata/
