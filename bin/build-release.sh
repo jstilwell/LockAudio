@@ -119,6 +119,64 @@ hdiutil create -volname "$PROJECT_NAME" \
 # Clean up temp directory
 rm -rf "$DMG_TEMP"
 
+# Notarize the DMG
+echo -e "${YELLOW}Submitting DMG for notarization...${NC}"
+
+# Submit for notarization (don't wait)
+SUBMISSION_ID=$(xcrun notarytool submit "$DMG_PATH" \
+    --keychain-profile "notarytool-profile" \
+    --output-format json 2>&1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+if [ -z "$SUBMISSION_ID" ]; then
+    echo -e "${RED}Error: Failed to submit for notarization${NC}"
+    echo "You can manually notarize later with:"
+    echo "  xcrun notarytool submit \"$DMG_PATH\" --keychain-profile \"notarytool-profile\""
+else
+    echo -e "${GREEN}Submitted for notarization!${NC}"
+    echo "Submission ID: $SUBMISSION_ID"
+    echo ""
+    echo -e "${YELLOW}Waiting for notarization to complete (this may take a few minutes)...${NC}"
+
+    # Wait for notarization with timeout
+    TIMEOUT=300  # 5 minutes
+    ELAPSED=0
+    while [ $ELAPSED -lt $TIMEOUT ]; do
+        STATUS=$(xcrun notarytool info "$SUBMISSION_ID" \
+            --keychain-profile "notarytool-profile" \
+            --output-format json 2>&1 | grep -o '"status":"[^"]*"' | cut -d'"' -f4)
+
+        if [ "$STATUS" = "Accepted" ]; then
+            echo -e "${GREEN}Notarization successful!${NC}"
+
+            # Staple the ticket
+            echo -e "${YELLOW}Stapling notarization ticket to DMG...${NC}"
+            xcrun stapler staple "$DMG_PATH"
+            echo -e "${GREEN}Stapling complete!${NC}"
+            break
+        elif [ "$STATUS" = "Invalid" ] || [ "$STATUS" = "Rejected" ]; then
+            echo -e "${RED}Notarization failed!${NC}"
+            echo "View details with:"
+            echo "  xcrun notarytool log \"$SUBMISSION_ID\" --keychain-profile \"notarytool-profile\""
+            exit 1
+        fi
+
+        echo -n "."
+        sleep 10
+        ELAPSED=$((ELAPSED + 10))
+    done
+
+    if [ $ELAPSED -ge $TIMEOUT ]; then
+        echo ""
+        echo -e "${YELLOW}Notarization is taking longer than expected.${NC}"
+        echo "Check status with:"
+        echo "  xcrun notarytool info \"$SUBMISSION_ID\" --keychain-profile \"notarytool-profile\""
+        echo "Once accepted, staple with:"
+        echo "  xcrun stapler staple \"$DMG_PATH\""
+    fi
+fi
+
+echo ""
+
 # Sign the update
 echo -e "${YELLOW}Signing update...${NC}"
 SIGNATURE=$("$SIGN_UPDATE" "$DMG_PATH")
