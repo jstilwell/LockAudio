@@ -96,10 +96,12 @@ echo -e "${YELLOW}Creating DMG with Applications folder symlink: ${DMG_NAME}${NC
 # Create a temporary directory for DMG contents
 DMG_TEMP="dmg_temp"
 mkdir -p "$DMG_TEMP"
+
+# Copy app
 cp -R "$RELEASE_DIR/$APP_NAME" "$DMG_TEMP/"
 
-# Create a symlink to /Applications
-ln -s /Applications "$DMG_TEMP/Applications"
+# Create a symlink to /Applications with a space prefix to sort after the app name
+ln -s /Applications "$DMG_TEMP/ Applications"
 
 # Create the DMG in the release directory
 hdiutil create -volname "$PROJECT_NAME" \

@@ -14,22 +14,35 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Frameworks**:
   - CoreAudio.framework - for audio device management
   - Cocoa.framework - for UI and system integration
+  - Sparkle (SPM) - automatic update framework
   - GBLaunchAtLogin - third-party library for launch-at-login functionality
 
 ## Build Commands
 
-### Building the application
+### Development build
 ```bash
+# Open in Xcode
+open "Mac Audio Input Locker.xcodeproj"
+
 # Build from command line
 xcodebuild -project "Mac Audio Input Locker.xcodeproj" -scheme "Mac Audio Input Locker" -configuration Release build
-
-# Or open in Xcode
-open "Mac Audio Input Locker.xcodeproj"
 ```
 
-### Clean build
+### Release build
 ```bash
-xcodebuild -project "Mac Audio Input Locker.xcodeproj" -scheme "Mac Audio Input Locker" clean
+# Build Universal Binary (Intel + Apple Silicon) and create DMG
+./bin/build-release.sh
+
+# Build and upload to GitHub with interactive release notes
+./bin/build-release.sh --upload
+
+# The script will:
+# - Check if version already exists on GitHub
+# - Build universal binary for x86_64 and arm64
+# - Create DMG with Applications folder symlink
+# - Sign update with EdDSA key from Keychain
+# - Generate appcast.xml with proper signatures
+# - Optionally create GitHub release and upload DMG
 ```
 
 ## Architecture
@@ -60,6 +73,14 @@ xcodebuild -project "Mac Audio Input Locker.xcodeproj" -scheme "Mac Audio Input 
 - Provides launch-at-login functionality
 - Simple API: `isLoginItem`, `addAppAsLoginItem`, `removeAppFromLoginItems`
 
+**Sparkle Auto-Update System**
+- Integrated via Swift Package Manager (SPM)
+- Public EdDSA key stored in Info.plist (`SUPublicEDKey`)
+- Private key stored securely in macOS Keychain
+- Update feed URL: `https://stilwell.dev/updates/mac_audio_input_locker/appcast.xml`
+- Updates are signed with EdDSA signatures in appcast.xml
+- Build script automatically signs DMG files using Sparkle's `sign_update` tool
+
 ### Key Implementation Details
 
 **Device Forcing Logic** (AppDelegate.m:292-311)
@@ -84,29 +105,60 @@ xcodebuild -project "Mac Audio Input Locker.xcodeproj" -scheme "Mac Audio Input 
 Mac Audio Input Locker/
 ├── AppDelegate.h/m          # Main application controller
 ├── main.m                   # Entry point
-├── Info.plist               # App metadata and configuration
+├── Info.plist               # App metadata, Sparkle config
 ├── Assets.xcassets          # Asset catalog
 ├── Base.lproj/MainMenu.xib  # Interface builder file
 └── airpods-icon*.png        # Menu bar icons
+
+bin/
+└── build-release.sh         # Automated release build script
 
 GBLaunchAtLogin/
 ├── GBLaunchAtLogin.h/m      # Launch-at-login helper
 ├── LICENSE
 └── README.md
+
+release/                     # Build output (gitignored)
+└── *.dmg                    # Signed DMG files
 ```
 
 ## Development Notes
 
 - Application uses LSUIElement to run as menu bar-only (no dock icon)
-- CoreAudio APIs used are deprecated; consider migrating to AVAudioSession/AVAudioEngine in future
+- Uses modern `kAudioObjectPropertyElementMain` (not deprecated `kAudioObjectPropertyElementMaster`)
 - No unit tests present in project
 - Sandbox is disabled (com.apple.Sandbox = 0 in project.pbxproj)
-- Development team ID: SGKB9R23YT
 - Bundle identifier: com.audio.locker
+
+## Release Process
+
+### Version Management
+1. Update `CFBundleShortVersionString` in Info.plist to new semantic version (e.g., 1.0.4)
+2. The build script automatically checks if the version already exists on GitHub
+3. Version format: semantic versioning (MAJOR.MINOR.PATCH)
+
+### Creating a Release
+1. Run `./bin/build-release.sh --upload`
+2. Script prompts for release notes (one feature per line, empty line to finish)
+3. Builds universal binary (Intel + Apple Silicon)
+4. Creates DMG with proper Applications folder layout
+5. Signs DMG with EdDSA key from Keychain
+6. Generates appcast.xml with signatures and file metadata
+7. Creates GitHub release with formatted release notes
+8. Uploads DMG to GitHub releases
+9. Upload appcast.xml to `https://stilwell.dev/updates/mac_audio_input_locker/appcast.xml`
+
+### Sparkle Key Management
+- Public key is in Info.plist (`SUPublicEDKey`)
+- Private key is stored in macOS Keychain (named "Private key for signing Sparkle updates")
+- Keys generated once with: `~/Library/Developer/Xcode/DerivedData/Mac_Audio_Input_Locker-*/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_keys`
+- Never commit private key or export it unless migrating to new machine
 
 ## Code Patterns
 
-- Objective-C manual memory management patterns (though ARC is enabled)
+- Objective-C with ARC enabled
 - C-style CoreAudio callback functions bridged to Objective-C via `__bridge`
 - Menu items use target-action pattern for event handling
 - Property listeners registered on `kAudioObjectSystemObject` for global audio changes
+- Version display shows only marketing version (not build number)
+- DMG layout: app on left, Applications symlink on right (using space prefix trick: " Applications")

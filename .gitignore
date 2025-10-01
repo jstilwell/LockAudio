@@ -4,7 +4,6 @@
 
 # App
 .DS_Store
-CLAUDE.md
 SPARKLE_SETUP.md
 appcast.xml
 bin/copy-appcast.sh
