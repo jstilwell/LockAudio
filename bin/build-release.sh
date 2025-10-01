@@ -53,6 +53,13 @@ if [ -z "$VERSION" ]; then
     exit 1
 fi
 
+# Ensure CFBundleVersion matches CFBundleShortVersionString
+BUILD_VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$PLIST_PATH")
+if [ "$BUILD_VERSION" != "$VERSION" ]; then
+    echo -e "${YELLOW}Syncing CFBundleVersion ($BUILD_VERSION) to match CFBundleShortVersionString ($VERSION)${NC}"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$PLIST_PATH"
+fi
+
 # Check if version tag already exists on GitHub
 if command -v gh &> /dev/null && gh auth status &> /dev/null 2>&1; then
     if gh release view "v${VERSION}" --repo jstilwell/MacAudioInputLocker &> /dev/null; then
