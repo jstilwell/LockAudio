@@ -119,36 +119,6 @@ hdiutil create -volname "$PROJECT_NAME" \
 # Clean up temp directory
 rm -rf "$DMG_TEMP"
 
-# Notarize the DMG
-echo -e "${YELLOW}Notarizing DMG with Apple...${NC}"
-echo "This may take a few minutes..."
-
-# Check if notarytool credentials are configured
-if ! xcrun notarytool history --keychain-profile "notarytool-profile" &> /dev/null; then
-    echo -e "${RED}Error: Notarization credentials not configured.${NC}"
-    echo "Run this command once to set up:"
-    echo "  xcrun notarytool store-credentials \"notarytool-profile\" \\"
-    echo "    --apple-id \"jesse.stilwell@icloud.com\" \\"
-    echo "    --team-id \"G65RD22S57\""
-    echo ""
-    echo "You'll need an app-specific password from: https://appleid.apple.com/account/manage"
-    exit 1
-fi
-
-# Submit for notarization and wait
-if ! xcrun notarytool submit "$DMG_PATH" \
-    --keychain-profile "notarytool-profile" \
-    --wait; then
-    echo -e "${RED}Error: Notarization failed${NC}"
-    exit 1
-fi
-
-# Staple the notarization ticket to the DMG
-echo -e "${YELLOW}Stapling notarization ticket...${NC}"
-xcrun stapler staple "$DMG_PATH"
-
-echo -e "${GREEN}Notarization complete!${NC}"
-
 # Sign the update
 echo -e "${YELLOW}Signing update...${NC}"
 SIGNATURE=$("$SIGN_UPDATE" "$DMG_PATH")
