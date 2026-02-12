@@ -42,6 +42,7 @@ xcodebuild -project "Mac Audio Input Locker.xcodeproj" -scheme "Mac Audio Input 
 # - Create DMG with Applications folder symlink
 # - Sign update with EdDSA key from Keychain
 # - Generate appcast.xml with proper signatures
+# - Upload appcast.xml to Cloudflare R2 automatically
 # - Optionally create GitHub release and upload DMG
 ```
 
@@ -77,7 +78,7 @@ xcodebuild -project "Mac Audio Input Locker.xcodeproj" -scheme "Mac Audio Input 
 - Integrated via Swift Package Manager (SPM)
 - Public EdDSA key stored in Info.plist (`SUPublicEDKey`)
 - Private key stored securely in macOS Keychain
-- Update feed URL: `https://stilwell.dev/updates/mac_audio_input_locker/appcast.xml`
+- Update feed URL: `https://mac-audio-input-locker.jesse.id/appcast.xml`
 - Updates are signed with EdDSA signatures in appcast.xml
 - Build script automatically signs DMG files using Sparkle's `sign_update` tool
 
@@ -109,6 +110,8 @@ Mac Audio Input Locker/
 ├── Assets.xcassets          # Asset catalog
 ├── Base.lproj/MainMenu.xib  # Interface builder file
 └── airpods-icon*.png        # Menu bar icons
+
+.env.example                   # R2 config template (copy to .env)
 
 bin/
 └── build-release.sh         # Automated release build script
@@ -144,9 +147,29 @@ release/                     # Build output (gitignored)
 4. Creates DMG with proper Applications folder layout
 5. Signs DMG with EdDSA key from Keychain
 6. Generates appcast.xml with signatures and file metadata
-7. Creates GitHub release with formatted release notes
-8. Uploads DMG to GitHub releases
-9. Upload appcast.xml to `https://stilwell.dev/updates/mac_audio_input_locker/appcast.xml`
+7. Uploads appcast.xml to Cloudflare R2 automatically
+8. Creates GitHub release with formatted release notes
+9. Uploads DMG to GitHub releases
+
+### Cloudflare R2 Setup (one-time)
+The appcast.xml update feed is hosted on Cloudflare R2 at `mac-audio-input-locker.jesse.id`.
+
+- **Bucket**: `mac-audio-input-locker` (with public access via custom domain)
+- **Custom domain**: `mac-audio-input-locker.jesse.id` (CNAME pointing to R2 bucket)
+- **Feed URL**: `https://mac-audio-input-locker.jesse.id/appcast.xml`
+
+To set up R2 credentials for the build script:
+1. Copy `.env.example` to `.env` and fill in your Cloudflare Account ID
+2. Create an R2 API token in Cloudflare dashboard (Object Read & Write permissions)
+3. Configure AWS CLI with an R2 profile:
+   ```bash
+   aws configure --profile r2
+   # Access Key ID: <from R2 API token>
+   # Secret Access Key: <from R2 API token>
+   # Region: auto
+   ```
+
+The build script automatically reads configuration from `.env` (gitignored) and updates `SUFeedURL` in Info.plist to match before building.
 
 ### Sparkle Key Management
 - Public key is in Info.plist (`SUPublicEDKey`)

@@ -4,9 +4,9 @@
 
 # App
 .DS_Store
+.env
 SPARKLE_SETUP.md
 appcast.xml
-bin/copy-appcast.sh
 release/
 
 ## Build generated

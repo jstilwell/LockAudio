@@ -9,7 +9,6 @@
     NSMenu* menu;
     NSStatusItem* statusItem;
     AudioDeviceID forcedInputID;
-    NSUserDefaults* defaults;
     NSMutableDictionary* itemsToIDS;
     NSMenuItem *startupItem;
     BOOL rebuildingMenu;
@@ -30,7 +29,7 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
                             void *inClientData)
 {
 
-    printf( "default input device changed" );
+    NSLog( @"default input device changed" );
     // check default input
     [ ( (__bridge  AppDelegate* ) inClientData ) listDevices ];
 
@@ -43,21 +42,18 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     // Initialize Sparkle updater
     self.updaterController = [[SPUStandardUpdaterController alloc] initWithStartingUpdater:YES updaterDelegate:nil userDriverDelegate:nil];
 
-    defaults = [ NSUserDefaults standardUserDefaults ];
-
     itemsToIDS = [ NSMutableDictionary dictionary ];
-    
-    
+
+
     NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
     NSInteger readenId = [prefs integerForKey: @"Device"];
 
     if (readenId == 0) {
         [prefs setInteger:UINT32_MAX forKey: @"Device"];
-        [prefs synchronize];
     }
 
     forcedInputID = (AudioDeviceID)readenId;
-    
+
     NSLog(@"Loaded device from UserDefaults: %d", forcedInputID);
 
     NSImage* image = [ NSImage imageNamed : @"airpods-icon" ];
@@ -101,7 +97,7 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
         &runLoop);
 
     [ self listDevices ];
-    
+
 }
 
 
@@ -109,19 +105,18 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 {
 
     NSNumber* number = itemsToIDS[ item.title ];
-    
+
     if ( number != nil )
     {
-    
+
         AudioDeviceID newId = [ number unsignedIntValue ];
-        
+
         NSLog( @"switching to new device : %u" , newId );
-        
+
         forcedInputID = newId;
-        
+
         NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
         [prefs setInteger:newId forKey: @"Device"];
-        [prefs synchronize];
         NSLog(@"Saved device from UserDefaults: %d", forcedInputID);
 
         AudioObjectPropertyAddress propertyAddress = {
@@ -144,7 +139,7 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
         });
 
     }
-    
+
 }
 
 
@@ -164,7 +159,7 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     menu.delegate = self;
     [ menu addItemWithTitle : versionString action : nil keyEquivalent : @"" ];
     [ menu addItem : [ NSMenuItem separatorItem ] ]; // A thin grey line
-    
+
     NSMenuItem* item =  [ menu
             addItemWithTitle : NSLocalizedString(@"Pause", @"Pause")
             action : @selector(manualPause:)
@@ -174,13 +169,10 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 
     [ menu addItem : [ NSMenuItem separatorItem ] ]; // A thin grey line
     [ menu addItemWithTitle : @"Forced input:" action : nil keyEquivalent : @"" ];
-    
+
     UInt32 propertySize;
 
-    AudioDeviceID dev_array[64];
-    int numberOfDevices = 0;
-    char deviceName[256];
-
+    // Get device count dynamically
     AudioObjectPropertyAddress devicesAddress = {
         kAudioHardwarePropertyDevices,
         kAudioObjectPropertyScopeGlobal,
@@ -194,6 +186,9 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
         NULL,
         &propertySize);
 
+    int numberOfDevices = ( propertySize / sizeof( AudioDeviceID ) );
+    AudioDeviceID *dev_array = (AudioDeviceID *)malloc(propertySize);
+
     AudioObjectGetPropertyData(
         kAudioObjectSystemObject,
         &devicesAddress,
@@ -201,32 +196,30 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
         NULL,
         &propertySize,
         dev_array);
-    
-    numberOfDevices = ( propertySize / sizeof( AudioDeviceID ) );
-    
+
     NSLog( @"devices found : %i" , numberOfDevices );
-    
+
     if ( forcedInputID < UINT32_MAX )
     {
-    
+
         char found = 0;
 
         for( int index = 0 ;
                  index < numberOfDevices ;
                  index++ )
         {
-        
+
             if ( dev_array[ index] == forcedInputID ) found = 1;
-        
+
         }
-        
+
         if ( found == 0 )
         {
             NSLog( @"force input not found in device list" );
             forcedInputID = UINT32_MAX;
         }
         else NSLog( @"force input found in device list" );
-        
+
     }
 
 
@@ -234,10 +227,10 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
              index < numberOfDevices ;
              index++ )
     {
-    
+
         AudioDeviceID oneDeviceID = dev_array[ index ];
 
-        propertySize = 256;
+        propertySize = 0;
 
         AudioObjectPropertyAddress streamsAddress = {
             kAudioDevicePropertyStreams,
@@ -256,9 +249,9 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 
         if ( propertySize > 0 )
         {
-        
-            // get name
 
+            // get name
+            char deviceName[256];
             propertySize = 256;
 
             AudioObjectPropertyAddress nameAddress = {
@@ -276,7 +269,7 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
                 deviceName);
 
             NSLog( @"found input device : %s  %u\n" , deviceName , (unsigned int)oneDeviceID );
-            
+
             NSString* nameStr = [ NSString stringWithUTF8String : deviceName ];
 
             if ( [ [ nameStr lowercaseString ] containsString : @"built" ] && forcedInputID == UINT32_MAX )
@@ -287,35 +280,33 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
                 NSLog( @"setting forced device : %s  %u\n" , deviceName , (unsigned int)oneDeviceID );
 
                 forcedInputID = oneDeviceID;
-                
+
             }
 
             NSMenuItem* item = [ menu
                 addItemWithTitle : [ NSString stringWithUTF8String : deviceName ]
                 action : @selector(deviceSelected:)
                 keyEquivalent : @"" ];
-            
+
             if ( oneDeviceID == forcedInputID )
             {
                 [ item setState : NSControlStateValueOn ];
                 NSLog( @"setting device selected : %s  %u\n" , deviceName , (unsigned int)oneDeviceID );
             }
-            
+
             itemsToIDS[ nameStr ] = [ NSNumber numberWithUnsignedInt : oneDeviceID];
 
         }
 
-        [ statusItem setMenu : menu ];
-
     }
 
-    // get current input device
+    free(dev_array);
+
+    [ statusItem setMenu : menu ];
+
+    // Force input device if needed (the callback will trigger another listDevices)
 
     AudioDeviceID deviceID = kAudioDeviceUnknown;
-
-    // get the default output device
-    // if it is not the built in, change
-
     propertySize = sizeof( deviceID );
 
     AudioObjectPropertyAddress defaultInputAddress = {
@@ -331,9 +322,9 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
         NULL,
         &propertySize,
         &deviceID);
-    
+
     NSLog( @"default input device is %u" , deviceID );
-    
+
     if ( !paused && deviceID != forcedInputID )
     {
 
@@ -344,39 +335,37 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
             kAudioObjectPropertyScopeGlobal,
             kAudioObjectPropertyElementMain
         };
-        UInt32 propertySize = sizeof(AudioDeviceID);
+        UInt32 forceSize = sizeof(AudioDeviceID);
         AudioObjectSetPropertyData(
             kAudioObjectSystemObject,
             &forceInputAddress,
             0,
             NULL,
-            propertySize,
+            forceSize,
             &forcedInputID);
 
-        // Rebuild menu after forcing device
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [self listDevices];
-        });
+        // No need to dispatch listDevices here — the CoreAudio property
+        // listener callback will fire and call listDevices for us.
 
     }
-    
+
     [ menu addItem : [ NSMenuItem separatorItem ] ]; // A thin grey line
 
     startupItem = [ menu
         addItemWithTitle : @"Open at login"
         action : @selector(toggleStartupItem)
         keyEquivalent : @"" ];
-    
+
     [ menu addItem : [ NSMenuItem separatorItem ] ]; // A thin grey line
 
     [ menu addItemWithTitle : @"Check for updates"
            action : @selector(update)
            keyEquivalent : @"" ];
-    
+
     [ menu addItemWithTitle : @"Hide"
            action : @selector(hide)
            keyEquivalent : @"" ];
-    
+
     [ menu addItemWithTitle : @"Quit"
            action : @selector(terminate)
            keyEquivalent : @"" ];
@@ -416,7 +405,7 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     {
         [GBLaunchAtLogin addAppAsLoginItem];
     }
-    
+
     [self updateStartupItemState];
 }
 
