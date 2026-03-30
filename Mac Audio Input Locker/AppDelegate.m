@@ -77,6 +77,19 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
         &callbackFunction,
         (__bridge  void* ) self );
 
+    // Listen for device list changes (devices added/removed)
+    AudioObjectPropertyAddress devicesChangedAddress = {
+        kAudioHardwarePropertyDevices,
+        kAudioObjectPropertyScopeGlobal,
+        kAudioObjectPropertyElementMain
+    };
+
+    AudioObjectAddPropertyListener(
+        kAudioObjectSystemObject,
+        &devicesChangedAddress,
+        &callbackFunction,
+        (__bridge  void* ) self );
+
     // Set the runloop to the main runloop for CoreAudio callbacks
     AudioObjectPropertyAddress runLoopAddress = {
         kAudioHardwarePropertyRunLoop,
