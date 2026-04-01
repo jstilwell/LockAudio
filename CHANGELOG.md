@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.0.7 - 03-31-2026
+
+### Fixed
+
+- Forced input selection is now persistent across device disconnects and reconnects — the app saves the device name and automatically restores the selection when the same device reappears with a new system ID
+
 ## 1.0.6 - 03-30-2026
 
 ### Fixed

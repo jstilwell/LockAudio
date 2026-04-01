@@ -9,6 +9,7 @@
     NSMenu* menu;
     NSStatusItem* statusItem;
     AudioDeviceID forcedInputID;
+    NSString* forcedInputName;
     NSMutableDictionary* itemsToIDS;
     NSMenuItem *startupItem;
     BOOL rebuildingMenu;
@@ -53,8 +54,9 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     }
 
     forcedInputID = (AudioDeviceID)readenId;
+    forcedInputName = [prefs stringForKey: @"DeviceName"];
 
-    NSLog(@"Loaded device from UserDefaults: %d", forcedInputID);
+    NSLog(@"Loaded device from UserDefaults: %d (name: %@)", forcedInputID, forcedInputName);
 
     NSImage* image = [ NSImage imageNamed : @"airpods-icon" ];
     [ image setTemplate : YES ];
@@ -128,9 +130,12 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 
         forcedInputID = newId;
 
+        forcedInputName = item.title;
+
         NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
         [prefs setInteger:newId forKey: @"Device"];
-        NSLog(@"Saved device from UserDefaults: %d", forcedInputID);
+        [prefs setObject:forcedInputName forKey: @"DeviceName"];
+        NSLog(@"Saved device to UserDefaults: %d (name: %@)", forcedInputID, forcedInputName);
 
         AudioObjectPropertyAddress propertyAddress = {
             kAudioHardwarePropertyDefaultInputDevice,
@@ -228,11 +233,90 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 
         if ( found == 0 )
         {
-            NSLog( @"force input not found in device list" );
-            forcedInputID = UINT32_MAX;
+            NSLog( @"force input not found by ID, searching by name: %@", forcedInputName );
+
+            // Device ID changed (e.g. reconnected) — try to find by name
+            if ( forcedInputName != nil )
+            {
+                for ( int index = 0; index < numberOfDevices; index++ )
+                {
+                    char deviceName[256];
+                    UInt32 nameSize = 256;
+
+                    AudioObjectPropertyAddress nameAddr = {
+                        kAudioDevicePropertyDeviceName,
+                        kAudioObjectPropertyScopeGlobal,
+                        kAudioObjectPropertyElementMain
+                    };
+
+                    AudioObjectGetPropertyData(
+                        dev_array[index],
+                        &nameAddr,
+                        0,
+                        NULL,
+                        &nameSize,
+                        deviceName);
+
+                    NSString* nameStr = [ NSString stringWithUTF8String : deviceName ];
+
+                    if ( [ nameStr isEqualToString : forcedInputName ] )
+                    {
+                        NSLog( @"force input recovered by name: %@ -> %u", nameStr, (unsigned int)dev_array[index] );
+                        forcedInputID = dev_array[index];
+
+                        NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
+                        [prefs setInteger:forcedInputID forKey: @"Device"];
+
+                        found = 1;
+                        break;
+                    }
+                }
+            }
+
+            if ( found == 0 )
+            {
+                NSLog( @"force input not found in device list" );
+                // Don't reset — keep the name so we can recover later
+            }
         }
         else NSLog( @"force input found in device list" );
 
+    }
+    else if ( forcedInputName != nil )
+    {
+        // forcedInputID is UINT32_MAX but we have a saved name — device was
+        // previously disconnected, try to find it again
+        for ( int index = 0; index < numberOfDevices; index++ )
+        {
+            char deviceName[256];
+            UInt32 nameSize = 256;
+
+            AudioObjectPropertyAddress nameAddr = {
+                kAudioDevicePropertyDeviceName,
+                kAudioObjectPropertyScopeGlobal,
+                kAudioObjectPropertyElementMain
+            };
+
+            AudioObjectGetPropertyData(
+                dev_array[index],
+                &nameAddr,
+                0,
+                NULL,
+                &nameSize,
+                deviceName);
+
+            NSString* nameStr = [ NSString stringWithUTF8String : deviceName ];
+
+            if ( [ nameStr isEqualToString : forcedInputName ] )
+            {
+                NSLog( @"force input restored from saved name: %@ -> %u", nameStr, (unsigned int)dev_array[index] );
+                forcedInputID = dev_array[index];
+
+                NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
+                [prefs setInteger:forcedInputID forKey: @"Device"];
+                break;
+            }
+        }
     }
 
 
@@ -285,14 +369,18 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 
             NSString* nameStr = [ NSString stringWithUTF8String : deviceName ];
 
-            if ( [ [ nameStr lowercaseString ] containsString : @"built" ] && forcedInputID == UINT32_MAX )
+            if ( [ [ nameStr lowercaseString ] containsString : @"built" ] && forcedInputID == UINT32_MAX && forcedInputName == nil )
             {
 
-                // if there is no forced device yet, select "built-in" by default
+                // if there is no forced device yet and no saved preference, select "built-in" by default
 
                 NSLog( @"setting forced device : %s  %u\n" , deviceName , (unsigned int)oneDeviceID );
 
                 forcedInputID = oneDeviceID;
+                forcedInputName = nameStr;
+
+                NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
+                [prefs setObject:forcedInputName forKey: @"DeviceName"];
 
             }
 
