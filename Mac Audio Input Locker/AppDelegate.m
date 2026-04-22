@@ -1,6 +1,14 @@
 #import "AppDelegate.h"
 #import "GBLaunchAtLogin.h"
 #import <CoreAudio/CoreAudio.h>
+#import <UserNotifications/UserNotifications.h>
+
+static NSString* const kPrefNotificationsEnabled = @"NotificationsEnabled";
+
+// Minimum gap between forced-input notifications. Under this threshold we
+// treat successive fires as CoreAudio churn (e.g. AirPods settling) and
+// suppress; legitimate user-driven switches always exceed this easily.
+static const NSTimeInterval kMinNotificationGap = 2.0;
 
 
 @interface AppDelegate ( )
@@ -12,7 +20,10 @@
     NSString* forcedInputName;
     NSMutableDictionary* itemsToIDS;
     NSMenuItem *startupItem;
+    NSMenuItem *notificationsItem;
     BOOL rebuildingMenu;
+    NSDate* lastNotificationTime;
+    BOOL notificationAuthGranted;
 }
 
 @property (weak) IBOutlet NSWindow *window;
@@ -31,8 +42,10 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 {
 
     NSLog( @"default input device changed" );
-    // check default input
-    [ ( (__bridge  AppDelegate* ) inClientData ) listDevices ];
+    AppDelegate *delegate = (__bridge AppDelegate *)inClientData;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [delegate listDevices];
+    });
 
     return 0;
 }
@@ -44,9 +57,15 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     self.updaterController = [[SPUStandardUpdaterController alloc] initWithStartingUpdater:YES updaterDelegate:nil userDriverDelegate:nil];
 
     itemsToIDS = [ NSMutableDictionary dictionary ];
+    lastNotificationTime = nil;
+    notificationAuthGranted = NO;
 
 
     NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
+    [prefs registerDefaults:@{
+        kPrefNotificationsEnabled: @YES,
+    }];
+
     NSInteger readenId = [prefs integerForKey: @"Device"];
 
     if (readenId == 0) {
@@ -55,6 +74,8 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 
     forcedInputID = (AudioDeviceID)readenId;
     forcedInputName = [prefs stringForKey: @"DeviceName"];
+
+    [self requestNotificationAuthorizationIfNeeded];
 
     NSLog(@"Loaded device from UserDefaults: %d (name: %@)", forcedInputID, forcedInputName);
 
@@ -132,6 +153,8 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 
         forcedInputName = item.title;
 
+        lastNotificationTime = nil;
+
         NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
         [prefs setInteger:newId forKey: @"Device"];
         [prefs setObject:forcedInputName forKey: @"DeviceName"];
@@ -172,6 +195,8 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     NSDictionary *bundleInfo = [ [ NSBundle mainBundle] infoDictionary];
     NSString *versionString = [ NSString stringWithFormat : @"Version %@",
                                bundleInfo[ @"CFBundleShortVersionString" ] ];
+
+    [ itemsToIDS removeAllObjects ];
 
     menu = [ [ NSMenu alloc ] init ];
     menu.delegate = self;
@@ -431,6 +456,9 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 
         NSLog( @"forcing input device for default : %u" , forcedInputID );
 
+        NSArray *offendingNames = [itemsToIDS allKeysForObject:[NSNumber numberWithUnsignedInt:deviceID]];
+        NSString *offendingName = offendingNames.firstObject;
+
         AudioObjectPropertyAddress forceInputAddress = {
             kAudioHardwarePropertyDefaultInputDevice,
             kAudioObjectPropertyScopeGlobal,
@@ -445,6 +473,10 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
             forceSize,
             &forcedInputID);
 
+        [ self handleForceAppliedForDevice : forcedInputID
+                                      name : forcedInputName
+                            offendingName : offendingName ];
+
         // No need to dispatch listDevices here — the CoreAudio property
         // listener callback will fire and call listDevices for us.
 
@@ -457,7 +489,16 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
         action : @selector(toggleStartupItem)
         keyEquivalent : @"" ];
 
+    notificationsItem = [ menu
+        addItemWithTitle : @"Notify on forced input"
+        action : @selector(toggleNotifications)
+        keyEquivalent : @"" ];
+
     [ menu addItem : [ NSMenuItem separatorItem ] ]; // A thin grey line
+
+    [ menu addItemWithTitle : @"Sound settings…"
+           action : @selector(openSoundSettings)
+           keyEquivalent : @"" ];
 
     [ menu addItemWithTitle : @"Check for updates"
            action : @selector(update)
@@ -491,6 +532,17 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     [self.updaterController checkForUpdates:nil];
 }
 
+- ( void ) openSoundSettings
+{
+    NSURL *url;
+    if (@available(macOS 13.0, *)) {
+        url = [NSURL URLWithString:@"x-apple.systempreferences:com.apple.Sound-Settings.extension?Input"];
+    } else {
+        url = [NSURL fileURLWithPath:@"/System/Library/PreferencePanes/Sound.prefPane"];
+    }
+    [[NSWorkspace sharedWorkspace] openURL:url];
+}
+
 - ( void ) hide
 {
     [statusItem setVisible:false];
@@ -515,9 +567,84 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     [startupItem setState: [GBLaunchAtLogin isLoginItem] ? NSControlStateValueOn : NSControlStateValueOff];
 }
 
+- (void)updateToggleStates
+{
+    NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
+    [notificationsItem setState: [prefs boolForKey:kPrefNotificationsEnabled] ? NSControlStateValueOn : NSControlStateValueOff];
+}
+
+- (void)toggleNotifications
+{
+    NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
+    BOOL enabled = ![prefs boolForKey:kPrefNotificationsEnabled];
+    [prefs setBool:enabled forKey:kPrefNotificationsEnabled];
+    [self updateToggleStates];
+    if (enabled) {
+        [self requestNotificationAuthorizationIfNeeded];
+    }
+}
+
+- (void)requestNotificationAuthorizationIfNeeded
+{
+    NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
+    if (![prefs boolForKey:kPrefNotificationsEnabled]) {
+        return;
+    }
+
+    UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
+    [center requestAuthorizationWithOptions:(UNAuthorizationOptionAlert | UNAuthorizationOptionSound)
+                          completionHandler:^(BOOL granted, NSError * _Nullable error) {
+        if (error) {
+            NSLog(@"Notification auth error: %@", error);
+        }
+        self->notificationAuthGranted = granted;
+    }];
+}
+
+- (void)handleForceAppliedForDevice:(AudioDeviceID)deviceID
+                               name:(NSString *)deviceName
+                      offendingName:(NSString *)offendingName
+{
+    NSDate *now = [NSDate date];
+    if (lastNotificationTime != nil &&
+        [now timeIntervalSinceDate:lastNotificationTime] < kMinNotificationGap) {
+        return;
+    }
+
+    lastNotificationTime = now;
+
+    NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
+
+    if ([prefs boolForKey:kPrefNotificationsEnabled] && notificationAuthGranted) {
+        UNMutableNotificationContent *content = [[UNMutableNotificationContent alloc] init];
+        content.title = @"Forced input active";
+
+        NSString *forcedName = deviceName ?: @"selected device";
+        if (offendingName != nil) {
+            content.body = [NSString stringWithFormat:@"%@ took input control. Forced input back to %@.", offendingName, forcedName];
+        } else {
+            content.body = [NSString stringWithFormat:@"Another device took input control. Forced input back to %@.", forcedName];
+        }
+
+        UNNotificationRequest *request = [UNNotificationRequest
+            requestWithIdentifier:[[NSUUID UUID] UUIDString]
+                          content:content
+                          trigger:nil];
+
+        [[UNUserNotificationCenter currentNotificationCenter]
+            addNotificationRequest:request
+             withCompletionHandler:^(NSError * _Nullable error) {
+                 if (error) {
+                     NSLog(@"Failed to post notification: %@", error);
+                 }
+             }];
+    }
+}
+
 - (void)menuWillOpen:(NSMenu *)menu
 {
     [self updateStartupItemState];
+    [self updateToggleStates];
 }
 
 @end
