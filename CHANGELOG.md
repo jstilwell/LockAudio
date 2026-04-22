@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file.
 
 - Suppress misleading "Forced input active" notifications when the selected forced input is not connected. The app now tracks whether the forced device is present in the current device list and skips the force-set call (and its notification) when it isn't, instead of silently no-op'ing the CoreAudio set and still firing the notification. When the device reconnects, the existing name-recovery path restores forcing automatically.
 - Only post the forced-input notification when `AudioObjectSetPropertyData` actually returns `noErr`, so other silent-failure cases can't produce a misleading notification either
+- Don't post a forced-input notification when the user picks a device from the menu. Previously the CoreAudio property listener could see the old default briefly after a user switch and re-force the new selection, firing a "Forced input active" notification as if an external device had taken control. User-initiated switches now set a one-shot suppression flag consumed by the next `listDevices` rebuild.
 
 ## 1.1.1 - 04-22-2026
 

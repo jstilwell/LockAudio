@@ -32,6 +32,7 @@ static const NSTimeInterval kMinNotificationGap = 2.0;
     NSMenuItem *startupItem;
     NSMenuItem *notificationsItem;
     BOOL rebuildingMenu;
+    BOOL suppressNextForceNotification;
     NSDate* lastNotificationTime;
     BOOL notificationAuthGranted;
     NSWindow* aboutWindow;
@@ -164,7 +165,11 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 
         forcedInputName = item.title;
 
-        lastNotificationTime = nil;
+        // User-initiated switch: don't notify when the force-set path runs
+        // during the follow-up listDevices (the CoreAudio callback can see
+        // the old default briefly and re-force, which would otherwise fire
+        // a misleading "Forced input active" notification).
+        suppressNextForceNotification = YES;
 
         NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
         [prefs setInteger:newId forKey: @"Device"];
@@ -495,9 +500,16 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 
         if ( forceStatus == noErr )
         {
-            [ self handleForceAppliedForDevice : forcedInputID
-                                          name : forcedInputName
-                                offendingName : offendingName ];
+            if ( suppressNextForceNotification )
+            {
+                NSLog( @"suppressing forced-input notification for user-initiated switch" );
+            }
+            else
+            {
+                [ self handleForceAppliedForDevice : forcedInputID
+                                              name : forcedInputName
+                                    offendingName : offendingName ];
+            }
         }
         else
         {
@@ -555,6 +567,7 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     }
 
     rebuildingMenu = NO;
+    suppressNextForceNotification = NO;
 
 }
 
