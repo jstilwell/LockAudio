@@ -78,7 +78,7 @@ xcodebuild -project "Mac Audio Input Locker.xcodeproj" -scheme "Mac Audio Input 
 - Integrated via Swift Package Manager (SPM)
 - Public EdDSA key stored in Info.plist (`SUPublicEDKey`)
 - Private key stored securely in macOS Keychain
-- Update feed URL: `https://mac-audio-input-locker.jesse.id/appcast.xml`
+- Update feed URL: `https://updates.macaudioinputlocker.com/appcast.xml` (legacy host `https://mac-audio-input-locker.jesse.id/appcast.xml` still serves the feed during transition)
 - Updates are signed with EdDSA signatures in appcast.xml
 - Build script automatically signs DMG files using Sparkle's `sign_update` tool
 
@@ -152,11 +152,11 @@ release/                     # Build output (gitignored)
 9. Uploads DMG to GitHub releases
 
 ### Cloudflare R2 Setup (one-time)
-The appcast.xml update feed is hosted on Cloudflare R2 at `mac-audio-input-locker.jesse.id`.
+The appcast.xml update feed is hosted on Cloudflare R2 at `updates.macaudioinputlocker.com`. The legacy host `mac-audio-input-locker.jesse.id` is kept alive during a transition period for users on pre-1.1.0 versions whose apps still poll the old URL.
 
 - **Bucket**: `mac-audio-input-locker` (with public access via custom domain)
-- **Custom domain**: `mac-audio-input-locker.jesse.id` (CNAME pointing to R2 bucket)
-- **Feed URL**: `https://mac-audio-input-locker.jesse.id/appcast.xml`
+- **Custom domain**: `updates.macaudioinputlocker.com` (CNAME pointing to R2 bucket)
+- **Feed URL**: `https://updates.macaudioinputlocker.com/appcast.xml`
 
 To set up R2 credentials for the build script:
 1. Copy `.env.example` to `.env` and fill in your Cloudflare Account ID

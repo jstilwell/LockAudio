@@ -55,6 +55,33 @@ fi
 R2_ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
 APPCAST_PUBLIC_URL="${APPCAST_BASE_URL}/${R2_APPCAST_PATH}"
 
+# Preflight: verify notarization credentials and Apple agreements before we
+# spend time building. A failure here means either the keychain profile is
+# missing or an Apple Developer / App Store Connect agreement is unsigned.
+echo -e "${YELLOW}Checking notarization credentials...${NC}"
+NOTARY_PREFLIGHT=$(xcrun notarytool history --keychain-profile "notarytool-profile" --output-format json 2>&1) || {
+    echo -e "${RED}Notarization preflight failed.${NC}"
+    echo ""
+    if echo "$NOTARY_PREFLIGHT" | grep -qi "agreement"; then
+        echo -e "${RED}An Apple Developer agreement needs to be accepted.${NC}"
+        echo "  1. Sign in at https://developer.apple.com/account and accept any pending agreement banners"
+        echo "  2. Also check https://appstoreconnect.apple.com/ → Business → Agreements, Tax, and Banking"
+        echo "  3. Only the Account Holder role can accept some agreements"
+        echo "  4. Changes can take up to 30 minutes to propagate"
+        echo ""
+    elif echo "$NOTARY_PREFLIGHT" | grep -qi "keychain"; then
+        echo -e "${RED}Keychain profile 'notarytool-profile' is missing.${NC}"
+        echo "  Create it with:"
+        echo "    xcrun notarytool store-credentials notarytool-profile \\"
+        echo "      --apple-id <your-apple-id> --team-id <your-team-id>"
+        echo ""
+    fi
+    echo "Raw error:"
+    echo "$NOTARY_PREFLIGHT"
+    exit 1
+}
+echo -e "${GREEN}Notarization credentials OK${NC}"
+
 # Get Sparkle tools path
 SPARKLE_BIN=$(find ~/Library/Developer/Xcode/DerivedData -path "*/SourcePackages/artifacts/sparkle/Sparkle/bin" -type d 2>/dev/null | head -1)
 if [ -z "$SPARKLE_BIN" ]; then
@@ -198,14 +225,27 @@ rm -rf "$DMG_TEMP"
 echo -e "${YELLOW}Submitting DMG for notarization...${NC}"
 
 # Submit for notarization (don't wait)
-SUBMISSION_ID=$(xcrun notarytool submit "$DMG_PATH" \
+NOTARY_SUBMIT_OUTPUT=$(xcrun notarytool submit "$DMG_PATH" \
     --keychain-profile "notarytool-profile" \
-    --output-format json 2>&1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+    --output-format json 2>&1)
+SUBMISSION_ID=$(echo "$NOTARY_SUBMIT_OUTPUT" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 
 if [ -z "$SUBMISSION_ID" ]; then
     echo -e "${RED}Error: Failed to submit for notarization${NC}"
-    echo "You can manually notarize later with:"
-    echo "  xcrun notarytool submit \"$DMG_PATH\" --keychain-profile \"notarytool-profile\""
+    if echo "$NOTARY_SUBMIT_OUTPUT" | grep -qi "agreement"; then
+        echo -e "${RED}An Apple Developer agreement needs to be accepted.${NC}"
+        echo "  Accept pending agreements at:"
+        echo "    https://developer.apple.com/account"
+        echo "    https://appstoreconnect.apple.com/ → Business → Agreements, Tax, and Banking"
+        echo "  Then retry manually:"
+        echo "    xcrun notarytool submit \"$DMG_PATH\" --keychain-profile \"notarytool-profile\""
+    else
+        echo "Raw error:"
+        echo "$NOTARY_SUBMIT_OUTPUT"
+        echo ""
+        echo "You can manually notarize later with:"
+        echo "  xcrun notarytool submit \"$DMG_PATH\" --keychain-profile \"notarytool-profile\""
+    fi
 else
     echo -e "${GREEN}Submitted for notarization!${NC}"
     echo "Submission ID: $SUBMISSION_ID"
