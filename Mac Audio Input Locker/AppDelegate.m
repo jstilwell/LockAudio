@@ -3,6 +3,16 @@
 #import <CoreAudio/CoreAudio.h>
 #import <UserNotifications/UserNotifications.h>
 
+@interface LinkCursorView : NSView
+@end
+
+@implementation LinkCursorView
+- (void)resetCursorRects
+{
+    [self addCursorRect:self.bounds cursor:[NSCursor pointingHandCursor]];
+}
+@end
+
 static NSString* const kPrefNotificationsEnabled = @"NotificationsEnabled";
 
 // Minimum gap between forced-input notifications. Under this threshold we
@@ -24,6 +34,7 @@ static const NSTimeInterval kMinNotificationGap = 2.0;
     BOOL rebuildingMenu;
     NSDate* lastNotificationTime;
     BOOL notificationAuthGranted;
+    NSWindow* aboutWindow;
 }
 
 @property (weak) IBOutlet NSWindow *window;
@@ -504,13 +515,20 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
            action : @selector(update)
            keyEquivalent : @"" ];
 
-    [ menu addItemWithTitle : @"Hide"
-           action : @selector(hide)
-           keyEquivalent : @"" ];
+    NSMenuItem *aboutItem = [ menu
+        addItemWithTitle : @"About"
+        action : @selector(showAbout)
+        keyEquivalent : @"" ];
 
-    [ menu addItemWithTitle : @"Quit"
-           action : @selector(terminate)
-           keyEquivalent : @"" ];
+    NSMenuItem *quitItem = [ menu
+        addItemWithTitle : @"Quit"
+        action : @selector(terminate)
+        keyEquivalent : @"" ];
+
+    if (@available(macOS 11.0, *)) {
+        aboutItem.image = [NSImage imageWithSystemSymbolName:@"info.circle" accessibilityDescription:@"About"];
+        quitItem.image = [NSImage imageWithSystemSymbolName:@"xmark.circle" accessibilityDescription:@"Quit"];
+    }
 
     rebuildingMenu = NO;
 
@@ -543,9 +561,113 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     [[NSWorkspace sharedWorkspace] openURL:url];
 }
 
-- ( void ) hide
+- ( void ) showAbout
 {
-    [statusItem setVisible:false];
+    if (aboutWindow == nil) {
+        aboutWindow = [self buildAboutWindow];
+    }
+    [NSApp activateIgnoringOtherApps:YES];
+    [aboutWindow center];
+    [aboutWindow makeKeyAndOrderFront:nil];
+}
+
+- (NSWindow *)buildAboutWindow
+{
+    CGFloat W = 460;
+    CGFloat H = 330;
+    NSRect frame = NSMakeRect(0, 0, W, H);
+    NSWindow *window = [[NSWindow alloc]
+        initWithContentRect:frame
+                  styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable)
+                    backing:NSBackingStoreBuffered
+                      defer:NO];
+    window.title = @"";
+    window.releasedWhenClosed = NO;
+    window.titlebarAppearsTransparent = YES;
+
+    NSView *content = window.contentView;
+
+    // App icon
+    CGFloat iconSize = 96;
+    NSImage *iconImage = [NSImage imageNamed:@"AppIcon"];
+    if (iconImage == nil) {
+        iconImage = [NSImage imageNamed:@"airpods-icon"];
+    }
+    NSImageView *iconView = [[NSImageView alloc] initWithFrame:NSMakeRect((W - iconSize) / 2, H - 28 - iconSize, iconSize, iconSize)];
+    iconView.image = iconImage;
+    iconView.imageScaling = NSImageScaleProportionallyUpOrDown;
+    [content addSubview:iconView];
+
+    // App name
+    NSTextField *nameLabel = [NSTextField labelWithString:@"Mac Audio Input Locker"];
+    nameLabel.font = [NSFont systemFontOfSize:22 weight:NSFontWeightBold];
+    nameLabel.alignment = NSTextAlignmentCenter;
+    nameLabel.frame = NSMakeRect(0, H - 160, W, 28);
+    [content addSubview:nameLabel];
+
+    // Version
+    NSString *version = [[NSBundle mainBundle] infoDictionary][@"CFBundleShortVersionString"];
+    NSTextField *versionLabel = [NSTextField labelWithString:[NSString stringWithFormat:@"Version %@", version]];
+    versionLabel.font = [NSFont systemFontOfSize:12];
+    versionLabel.textColor = [NSColor secondaryLabelColor];
+    versionLabel.alignment = NSTextAlignmentCenter;
+    versionLabel.frame = NSMakeRect(0, H - 182, W, 18);
+    [content addSubview:versionLabel];
+
+    // Links — URLs verbatim, centered
+    NSArray *links = @[
+        @[@"https://www.macaudioinputlocker.com", @"https://www.macaudioinputlocker.com"],
+        @[@"https://github.com/jstilwell/MacAudioInputLocker", @"https://github.com/jstilwell/MacAudioInputLocker"],
+        @[@"contact@macaudioinputlocker.com", @"mailto:contact@macaudioinputlocker.com"],
+    ];
+    CGFloat linksTop = H - 215;
+    CGFloat linkHeight = 20;
+    CGFloat linkSpacing = 2;
+    for (NSUInteger i = 0; i < links.count; i++) {
+        CGFloat y = linksTop - (i * (linkHeight + linkSpacing));
+        NSView *linkView = [self linkViewWithTitle:links[i][0]
+                                                url:links[i][1]
+                                              frame:NSMakeRect(20, y, W - 40, linkHeight)];
+        [content addSubview:linkView];
+    }
+
+    // Copyright
+    NSString *copyright = [[NSBundle mainBundle] infoDictionary][@"NSHumanReadableCopyright"] ?: @"";
+    NSTextField *copyrightLabel = [NSTextField labelWithString:copyright];
+    copyrightLabel.font = [NSFont systemFontOfSize:11];
+    copyrightLabel.textColor = [NSColor tertiaryLabelColor];
+    copyrightLabel.alignment = NSTextAlignmentCenter;
+    copyrightLabel.frame = NSMakeRect(20, 36, W - 40, 16);
+    [content addSubview:copyrightLabel];
+
+    return window;
+}
+
+- (NSView *)linkViewWithTitle:(NSString *)title url:(NSString *)url frame:(NSRect)frame
+{
+    NSMutableParagraphStyle *centered = [[NSMutableParagraphStyle alloc] init];
+    centered.alignment = NSTextAlignmentCenter;
+
+    NSAttributedString *attr = [[NSAttributedString alloc] initWithString:title
+        attributes:@{
+            NSFontAttributeName: [NSFont systemFontOfSize:12],
+            NSForegroundColorAttributeName: [NSColor linkColor],
+            NSLinkAttributeName: [NSURL URLWithString:url],
+            NSParagraphStyleAttributeName: centered,
+        }];
+
+    NSTextField *field = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, frame.size.width, frame.size.height)];
+    field.editable = NO;
+    field.bordered = NO;
+    field.drawsBackground = NO;
+    field.selectable = YES;
+    field.allowsEditingTextAttributes = YES;
+    field.alignment = NSTextAlignmentCenter;
+    field.attributedStringValue = attr;
+
+    LinkCursorView *wrapper = [[LinkCursorView alloc] initWithFrame:frame];
+    [wrapper addSubview:field];
+    return wrapper;
 }
 
 - (void)toggleStartupItem

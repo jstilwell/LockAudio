@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.1.1 - 04-22-2026
+
+### Added
+
+- "About" menu item (replaces "Hide") opening a window with the app version, website, GitHub, support email, and copyright
+- SF Symbol icons on the "About" and "Quit" menu items (macOS 11+)
+
+### Changed
+
+- Appcast update feed moved to `https://updates.macaudioinputlocker.com/appcast.xml` (the legacy `mac-audio-input-locker.jesse.id` host will keep serving older versions during a transition period)
+- Copyright string in Info.plist corrected to "Jesse Stilwell"
+- `build-release.sh` preflights notarization credentials and Apple agreement status before starting the build, and surfaces the underlying notarytool error if the submission fails (instead of a generic message)
+
 ## 1.1.0 - 04-22-2026
 
 ### Added
