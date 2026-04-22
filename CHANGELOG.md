@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.1.0 - 04-22-2026
+
+### Added
+
+- Optional notification every time the app forces the input back to the selected device (toggle: "Notify on forced input", enabled by default). Notification body names both the interloping device and the restored device, e.g. "AirPods took input control. Forced input back to HyperX."
+- 2-second minimum gap between forced-input notifications to suppress CoreAudio churn (e.g. AirPods reconnecting fires the default-input callback multiple times in quick succession). Manually picking a device from the menu always bypasses the gap so rapid user-driven switching still fires every notification.
+- "Sound settings…" menu item that opens the system Sound pane directly to the Input tab (macOS 13+) or the Sound preference pane (older versions)
+
+### Fixed
+
+- Clear the device name → ID lookup table at the start of each menu rebuild so stale entries from disconnected devices can't be selected
+
 ## 1.0.7 - 03-31-2026
 
 ### Fixed
