@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.1.2 - 04-22-2026
+
+### Fixed
+
+- Suppress misleading "Forced input active" notifications when the selected forced input is not connected. The app now tracks whether the forced device is present in the current device list and skips the force-set call (and its notification) when it isn't, instead of silently no-op'ing the CoreAudio set and still firing the notification. When the device reconnects, the existing name-recovery path restores forcing automatically.
+- Only post the forced-input notification when `AudioObjectSetPropertyData` actually returns `noErr`, so other silent-failure cases can't produce a misleading notification either
+
 ## 1.1.1 - 04-22-2026
 
 ### Added

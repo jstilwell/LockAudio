@@ -253,6 +253,8 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 
     NSLog( @"devices found : %i" , numberOfDevices );
 
+    BOOL forcedDeviceAvailable = NO;
+
     if ( forcedInputID < UINT32_MAX )
     {
 
@@ -304,6 +306,7 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
                         [prefs setInteger:forcedInputID forKey: @"Device"];
 
                         found = 1;
+                        forcedDeviceAvailable = YES;
                         break;
                     }
                 }
@@ -315,7 +318,11 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
                 // Don't reset — keep the name so we can recover later
             }
         }
-        else NSLog( @"force input found in device list" );
+        else
+        {
+            NSLog( @"force input found in device list" );
+            forcedDeviceAvailable = YES;
+        }
 
     }
     else if ( forcedInputName != nil )
@@ -350,6 +357,7 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 
                 NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
                 [prefs setInteger:forcedInputID forKey: @"Device"];
+                forcedDeviceAvailable = YES;
                 break;
             }
         }
@@ -414,6 +422,7 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 
                 forcedInputID = oneDeviceID;
                 forcedInputName = nameStr;
+                forcedDeviceAvailable = YES;
 
                 NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
                 [prefs setObject:forcedInputName forKey: @"DeviceName"];
@@ -462,7 +471,7 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 
     NSLog( @"default input device is %u" , deviceID );
 
-    if ( !paused && deviceID != forcedInputID )
+    if ( !paused && forcedDeviceAvailable && deviceID != forcedInputID )
     {
 
         NSLog( @"forcing input device for default : %u" , forcedInputID );
@@ -476,7 +485,7 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
             kAudioObjectPropertyElementMain
         };
         UInt32 forceSize = sizeof(AudioDeviceID);
-        AudioObjectSetPropertyData(
+        OSStatus forceStatus = AudioObjectSetPropertyData(
             kAudioObjectSystemObject,
             &forceInputAddress,
             0,
@@ -484,13 +493,24 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
             forceSize,
             &forcedInputID);
 
-        [ self handleForceAppliedForDevice : forcedInputID
-                                      name : forcedInputName
-                            offendingName : offendingName ];
+        if ( forceStatus == noErr )
+        {
+            [ self handleForceAppliedForDevice : forcedInputID
+                                          name : forcedInputName
+                                offendingName : offendingName ];
+        }
+        else
+        {
+            NSLog( @"force input failed: OSStatus %d", (int)forceStatus );
+        }
 
         // No need to dispatch listDevices here — the CoreAudio property
         // listener callback will fire and call listDevices for us.
 
+    }
+    else if ( !paused && !forcedDeviceAvailable && forcedInputName != nil )
+    {
+        NSLog( @"skipping force: forced device '%@' is not connected", forcedInputName );
     }
 
     [ menu addItem : [ NSMenuItem separatorItem ] ]; // A thin grey line
