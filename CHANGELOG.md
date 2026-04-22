@@ -7,7 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - "About" menu item (replaces "Hide") opening a window with the app version, website, GitHub, support email, and copyright
-- SF Symbol icons on the "About" and "Quit" menu items (macOS 11+)
+- SF Symbol icons on the "Sound settings…", "Check for updates", "About", and "Quit" menu items (macOS 11+)
 
 ### Changed
 

@@ -507,13 +507,15 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 
     [ menu addItem : [ NSMenuItem separatorItem ] ]; // A thin grey line
 
-    [ menu addItemWithTitle : @"Sound settings…"
-           action : @selector(openSoundSettings)
-           keyEquivalent : @"" ];
+    NSMenuItem *soundItem = [ menu
+        addItemWithTitle : @"Sound settings…"
+        action : @selector(openSoundSettings)
+        keyEquivalent : @"" ];
 
-    [ menu addItemWithTitle : @"Check for updates"
-           action : @selector(update)
-           keyEquivalent : @"" ];
+    NSMenuItem *updateItem = [ menu
+        addItemWithTitle : @"Check for updates"
+        action : @selector(update)
+        keyEquivalent : @"" ];
 
     NSMenuItem *aboutItem = [ menu
         addItemWithTitle : @"About"
@@ -526,6 +528,8 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
         keyEquivalent : @"" ];
 
     if (@available(macOS 11.0, *)) {
+        soundItem.image = [NSImage imageWithSystemSymbolName:@"gearshape" accessibilityDescription:@"Sound settings"];
+        updateItem.image = [NSImage imageWithSystemSymbolName:@"arrow.triangle.2.circlepath" accessibilityDescription:@"Check for updates"];
         aboutItem.image = [NSImage imageWithSystemSymbolName:@"info.circle" accessibilityDescription:@"About"];
         quitItem.image = [NSImage imageWithSystemSymbolName:@"xmark.circle" accessibilityDescription:@"Quit"];
     }
