@@ -35,6 +35,7 @@ static const NSTimeInterval kMinNotificationGap = 2.0;
     BOOL suppressNextForceNotification;
     NSDate* lastNotificationTime;
     BOOL notificationAuthGranted;
+    BOOL screenLocked;
     NSWindow* aboutWindow;
 }
 
@@ -71,6 +72,17 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     itemsToIDS = [ NSMutableDictionary dictionary ];
     lastNotificationTime = nil;
     notificationAuthGranted = NO;
+    screenLocked = NO;
+
+    NSDistributedNotificationCenter *dnc = [NSDistributedNotificationCenter defaultCenter];
+    [dnc addObserver:self
+            selector:@selector(screenDidLock:)
+                name:@"com.apple.screenIsLocked"
+              object:nil];
+    [dnc addObserver:self
+            selector:@selector(screenDidUnlock:)
+                name:@"com.apple.screenIsUnlocked"
+              object:nil];
 
 
     NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
@@ -774,7 +786,7 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 
     NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
 
-    if ([prefs boolForKey:kPrefNotificationsEnabled] && notificationAuthGranted) {
+    if ([prefs boolForKey:kPrefNotificationsEnabled] && notificationAuthGranted && !screenLocked) {
         UNMutableNotificationContent *content = [[UNMutableNotificationContent alloc] init];
         content.title = @"Forced input active";
 
@@ -798,6 +810,16 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
                  }
              }];
     }
+}
+
+- (void)screenDidLock:(NSNotification *)note
+{
+    screenLocked = YES;
+}
+
+- (void)screenDidUnlock:(NSNotification *)note
+{
+    screenLocked = NO;
 }
 
 - (void)menuWillOpen:(NSMenu *)menu
