@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		3333F8A7219874D300816A9F /* AppDelegate.m in Sources */ = {isa = PBXBuildFile; fileRef = 3333F8A6219874D300816A9F /* AppDelegate.m */; };
+		5F15B4F1E0644EBABCC959C3 /* AudioLock.m in Sources */ = {isa = PBXBuildFile; fileRef = 52BCABA87292405CA2EDE4CC /* AudioLock.m */; };
 		3333F8A9219874D600816A9F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 3333F8A8219874D600816A9F /* Assets.xcassets */; };
 		3333F8AC219874D600816A9F /* MainMenu.xib in Resources */ = {isa = PBXBuildFile; fileRef = 3333F8AA219874D600816A9F /* MainMenu.xib */; };
 		3333F8AF219874D600816A9F /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = 3333F8AE219874D600816A9F /* main.m */; };
@@ -23,6 +24,8 @@
 		3333F8A2219874D300816A9F /* LockAudio.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LockAudio.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		3333F8A5219874D300816A9F /* AppDelegate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AppDelegate.h; sourceTree = "<group>"; };
 		3333F8A6219874D300816A9F /* AppDelegate.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = AppDelegate.m; sourceTree = "<group>"; };
+		52BCABA87292405CA2EDE4CC /* AudioLock.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = AudioLock.m; sourceTree = "<group>"; };
+		C23DF0C101AF4273A91B5CC8 /* AudioLock.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AudioLock.h; sourceTree = "<group>"; };
 		3333F8A8219874D600816A9F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		3333F8AB219874D600816A9F /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.xib; name = Base; path = Base.lproj/MainMenu.xib; sourceTree = "<group>"; };
 		3333F8AD219874D600816A9F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -74,6 +77,8 @@
 				335B966E21988E6700F6D77B /* airpods-icon@2x.png */,
 				3333F8A5219874D300816A9F /* AppDelegate.h */,
 				3333F8A6219874D300816A9F /* AppDelegate.m */,
+				C23DF0C101AF4273A91B5CC8 /* AudioLock.h */,
+				52BCABA87292405CA2EDE4CC /* AudioLock.m */,
 				3333F8A8219874D600816A9F /* Assets.xcassets */,
 				3333F8AA219874D600816A9F /* MainMenu.xib */,
 				3333F8AD219874D600816A9F /* Info.plist */,
@@ -189,6 +194,7 @@
 				335B96782199C07000F6D77B /* GBLaunchAtLogin.m in Sources */,
 				3333F8AF219874D600816A9F /* main.m in Sources */,
 				3333F8A7219874D300816A9F /* AppDelegate.m in Sources */,
+				5F15B4F1E0644EBABCC959C3 /* AudioLock.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
