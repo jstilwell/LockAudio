@@ -6,9 +6,10 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- Output locking: in addition to forcing the input device, you can now lock the system's audio output to a device of your choice under the new "Forced output:" menu section. Output locking is off by default — pick an output device to turn it on. Input and output locks are fully independent, so you can keep your mic on the built-in input while locking output wherever you like.
+- Output locking: in addition to forcing the input device, you can now lock the system's audio output to a device of your choice. Input and output locks are fully independent, so you can keep your mic on the built-in input while locking output wherever you like. Output options are hidden by default (input locking is the common case) — turn on "Show Output Options" to reveal the "Forced output:" section and pick a device.
+- "Show Input Options" and "Show Output Options" toggles let you hide the controls for a direction you don't use. Hiding a direction also pauses its lock; showing it again restores it.
 - "Notify on forced output" toggle (off by default), mirroring the existing input notification. When the locked output is taken over by another device, the app forces it back and — if enabled — posts a notification naming both devices.
-- Per-lock pause: "Pause Input Lock" and "Pause Output Lock" let you temporarily disable forcing in each direction independently.
+- Per-lock pause: "Pause Input Lock" and "Pause Output Lock" let you temporarily disable forcing in each direction independently. Pause state, device choices, and the show/hide toggles all persist across quitting the app and rebooting.
 
 ### Changed
 
