@@ -326,7 +326,7 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     [ self appendDevicesForLock : inputLock toMenu : menu ];
 
     NSMenuItem* pauseInput = [ menu
-            addItemWithTitle : @"Pause input"
+            addItemWithTitle : @"Pause Input Lock"
             action : @selector(manualPauseInput:)
             keyEquivalent : @"" ];
     if ( inputLock.paused ) [ pauseInput setState : NSControlStateValueOn ];
@@ -338,7 +338,7 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     [ self appendDevicesForLock : outputLock toMenu : menu ];
 
     NSMenuItem* pauseOutput = [ menu
-            addItemWithTitle : @"Pause output"
+            addItemWithTitle : @"Pause Output Lock"
             action : @selector(manualPauseOutput:)
             keyEquivalent : @"" ];
     if ( outputLock.paused ) [ pauseOutput setState : NSControlStateValueOn ];
@@ -383,6 +383,14 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
         keyEquivalent : @"" ];
 
     if (@available(macOS 11.0, *)) {
+        // App-control items carry SF Symbol icons; selectable device rows stay
+        // icon-less (just a checkmark), so the icon vs no-icon contrast
+        // distinguishes actions from device choices.
+        pauseInput.image = [NSImage imageWithSystemSymbolName:@"pause.circle" accessibilityDescription:@"Pause Input Lock"];
+        pauseOutput.image = [NSImage imageWithSystemSymbolName:@"pause.circle" accessibilityDescription:@"Pause Output Lock"];
+        startupItem.image = [NSImage imageWithSystemSymbolName:@"power" accessibilityDescription:@"Open at login"];
+        notificationsItem.image = [NSImage imageWithSystemSymbolName:@"bell" accessibilityDescription:@"Notify on forced input"];
+        outputNotificationsItem.image = [NSImage imageWithSystemSymbolName:@"bell" accessibilityDescription:@"Notify on forced output"];
         soundItem.image = [NSImage imageWithSystemSymbolName:@"gearshape" accessibilityDescription:@"Sound settings"];
         updateItem.image = [NSImage imageWithSystemSymbolName:@"arrow.triangle.2.circlepath" accessibilityDescription:@"Check for updates"];
         aboutItem.image = [NSImage imageWithSystemSymbolName:@"info.circle" accessibilityDescription:@"About"];
