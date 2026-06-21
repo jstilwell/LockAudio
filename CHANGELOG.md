@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## 2.0.0 - 06-21-2026
+
+### Added
+
+- Output locking: in addition to forcing the input device, you can now lock the system's audio output to a device of your choice under the new "Forced output:" menu section. Output locking is off by default — pick an output device to turn it on. Input and output locks are fully independent, so you can keep your mic on the built-in input while locking output wherever you like.
+- "Notify on forced output" toggle (off by default), mirroring the existing input notification. When the locked output is taken over by another device, the app forces it back and — if enabled — posts a notification naming both devices.
+- Per-lock pause: "Pause Input Lock" and "Pause Output Lock" let you temporarily disable forcing in each direction independently.
+
+### Changed
+
+- The app is now called LockAudio (formerly Mac Audio Input Locker). The website has moved to lockaudio.com and support is now contact@lockaudio.com.
+- Menu controls (pause, notifications, open-at-login) now show icons, so app actions are easy to tell apart from the selectable device rows.
+- "Sound settings…" now opens the general Sound pane (covering both input and output) instead of the Input tab.
+
 ## 1.1.3 - 05-15-2026
 
 ### Fixed
