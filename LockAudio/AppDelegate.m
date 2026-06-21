@@ -15,6 +15,16 @@
 
 static NSString* const kPrefNotificationsEnabled = @"NotificationsEnabled";
 
+// Persisted launch-at-login state. The app's actual login-item registration
+// lives in SMAppService (queried live by GBLaunchAtLogin), but we also mirror
+// it here so the preference is migratable across a future bundle-identifier
+// change — the way the device preference is.
+static NSString* const kPrefLaunchAtLogin = @"LaunchAtLogin";
+
+// Bundle identifier of the app before the LockAudio rename. Used once, on first
+// launch under the new identifier, to migrate the user's saved settings.
+static NSString* const kLegacyBundleIdentifier = @"com.audio.locker";
+
 // Minimum gap between forced-input notifications. Under this threshold we
 // treat successive fires as CoreAudio churn (e.g. AirPods settling) and
 // suppress; legitimate user-driven switches always exceed this easily.
@@ -64,6 +74,67 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 }
 
 
+// Copies the user's settings from the pre-rename app (com.audio.locker) into
+// this app's preferences the first time we launch under the new bundle
+// identifier. Runs at most once: as soon as a "Device" value exists in our own
+// domain, there is nothing to migrate. Reads the legacy domain with
+// CFPreferencesCopyAppValue, which works across bundle identifiers.
+- ( void ) migrateSettingsFromLegacyBundleIfNeeded
+{
+    NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
+
+    // If we already have a saved device, the user has used (or migrated into)
+    // this app before — don't touch anything.
+    if ( [prefs objectForKey:@"Device"] != nil )
+    {
+        return;
+    }
+
+    CFStringRef legacyID = (__bridge CFStringRef)kLegacyBundleIdentifier;
+
+    id legacyDevice = (__bridge_transfer id)CFPreferencesCopyAppValue(
+        CFSTR("Device"), legacyID);
+
+    // No legacy device means this is a genuine fresh install, not an upgrade.
+    if ( legacyDevice == nil )
+    {
+        return;
+    }
+
+    [prefs setInteger:[legacyDevice integerValue] forKey:@"Device"];
+
+    id legacyDeviceName = (__bridge_transfer id)CFPreferencesCopyAppValue(
+        CFSTR("DeviceName"), legacyID);
+    if ( [legacyDeviceName isKindOfClass:[NSString class]] )
+    {
+        [prefs setObject:legacyDeviceName forKey:@"DeviceName"];
+    }
+
+    id legacyNotifications = (__bridge_transfer id)CFPreferencesCopyAppValue(
+        (__bridge CFStringRef)kPrefNotificationsEnabled, legacyID);
+    if ( legacyNotifications != nil )
+    {
+        [prefs setBool:[legacyNotifications boolValue] forKey:kPrefNotificationsEnabled];
+    }
+
+    // Launch-at-login: the legacy app never persisted this preference (it read
+    // SMAppService live), so there is usually nothing to read here. If a value
+    // is present and on, re-register LockAudio once so the behaviour carries
+    // over. From now on we persist the flag (see toggleStartupItem), so this is
+    // the last rename that can lose it.
+    id legacyLaunchAtLogin = (__bridge_transfer id)CFPreferencesCopyAppValue(
+        (__bridge CFStringRef)kPrefLaunchAtLogin, legacyID);
+    if ( [legacyLaunchAtLogin boolValue] && ![GBLaunchAtLogin isLoginItem] )
+    {
+        [GBLaunchAtLogin addAppAsLoginItem];
+        [prefs setBool:YES forKey:kPrefLaunchAtLogin];
+    }
+
+    NSLog(@"Migrated settings from legacy bundle %@: Device=%ld name=%@",
+          kLegacyBundleIdentifier, (long)[legacyDevice integerValue], legacyDeviceName);
+}
+
+
 - ( void ) applicationDidFinishLaunching : ( NSNotification* ) aNotification
 {
     // Initialize Sparkle updater
@@ -84,6 +155,12 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
                 name:@"com.apple.screenIsUnlocked"
               object:nil];
 
+
+    // One-time migration of settings from the pre-rename app (com.audio.locker).
+    // The rename to LockAudio changed the bundle identifier to com.lockaudio.app,
+    // so NSUserDefaults starts empty for upgrading users. Seed it from the old
+    // domain's values the first time we launch under the new identifier.
+    [self migrateSettingsFromLegacyBundleIfNeeded];
 
     NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
     [prefs registerDefaults:@{
@@ -107,7 +184,7 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     [ image setTemplate : YES ];
 
     statusItem = [ [ NSStatusBar systemStatusBar ] statusItemWithLength : NSVariableStatusItemLength ];
-    statusItem.button.toolTip = @"Mac Audio Input Locker";
+    statusItem.button.toolTip = @"LockAudio";
     statusItem.button.image = image;
 
     // add listener for detecting when input device is changed
@@ -648,7 +725,7 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     [content addSubview:iconView];
 
     // App name
-    NSTextField *nameLabel = [NSTextField labelWithString:@"Mac Audio Input Locker"];
+    NSTextField *nameLabel = [NSTextField labelWithString:@"LockAudio"];
     nameLabel.font = [NSFont systemFontOfSize:22 weight:NSFontWeightBold];
     nameLabel.alignment = NSTextAlignmentCenter;
     nameLabel.frame = NSMakeRect(0, H - 160, W, 28);
@@ -665,9 +742,9 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 
     // Links — URLs verbatim, centered
     NSArray *links = @[
-        @[@"https://www.macaudioinputlocker.com", @"https://www.macaudioinputlocker.com"],
-        @[@"https://github.com/jstilwell/MacAudioInputLocker", @"https://github.com/jstilwell/MacAudioInputLocker"],
-        @[@"contact@macaudioinputlocker.com", @"mailto:contact@macaudioinputlocker.com"],
+        @[@"https://www.lockaudio.com", @"https://www.lockaudio.com"],
+        @[@"https://github.com/jstilwell/LockAudio", @"https://github.com/jstilwell/LockAudio"],
+        @[@"contact@lockaudio.com", @"mailto:contact@lockaudio.com"],
     ];
     CGFloat linksTop = H - 215;
     CGFloat linkHeight = 20;
@@ -729,6 +806,11 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     {
         [GBLaunchAtLogin addAppAsLoginItem];
     }
+
+    // Mirror the resulting state into preferences so it survives a future
+    // bundle-identifier change (see migrateSettingsFromLegacyBundleIfNeeded).
+    [[NSUserDefaults standardUserDefaults] setBool:[GBLaunchAtLogin isLoginItem]
+                                            forKey:kPrefLaunchAtLogin];
 
     [self updateStartupItemState];
 }
