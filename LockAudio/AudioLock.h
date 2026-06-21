@@ -33,6 +33,11 @@ typedef NS_ENUM(NSUInteger, AudioLockDirection) {
 /// When YES, forcing is temporarily disabled for this direction.
 @property (nonatomic) BOOL paused;
 
+/// Stashed `paused` value from just before this direction's menu section was
+/// hidden, so that showing it again can restore the user's prior pause choice
+/// (hiding always pauses; showing restores this).
+@property (nonatomic) BOOL pausedBeforeHide;
+
 /// Designated initializer. `defaultsKey` / `defaultsNameKey` are the
 /// NSUserDefaults keys used to persist the device id and name.
 - (instancetype)initWithDirection:(AudioLockDirection)direction
