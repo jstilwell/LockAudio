@@ -28,10 +28,17 @@ static NSString* const kPrefOutputDeviceName = @"OutputDeviceName";
 
 // Per-direction "show these options in the menu" toggles. When a direction is
 // hidden its whole menu section is removed and its lock is paused; showing it
-// again restores the lock's prior pause state. Both default ON so existing
-// installs are unaffected.
+// again restores the lock's prior pause state. Input defaults ON (the common
+// case); output defaults OFF (rare case — users opt in).
 static NSString* const kPrefShowInputOptions = @"ShowInputOptions";
 static NSString* const kPrefShowOutputOptions = @"ShowOutputOptions";
+
+// Per-direction pause *preference*, persisted across launches. This is the
+// user's intended pause state for a visible section; while a section is hidden
+// its lock is force-paused at runtime but this preference is preserved so it
+// returns to the right state when shown again.
+static NSString* const kPrefInputPaused = @"InputPaused";
+static NSString* const kPrefOutputPaused = @"OutputPaused";
 
 // Persisted launch-at-login state. The app's actual login-item registration
 // lives in SMAppService (queried live by GBLaunchAtLogin), but we also mirror
@@ -192,9 +199,13 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
         // Output locking is opt-in: notifications default off and no output
         // device is forced until the user chooses one.
         kPrefOutputNotificationsEnabled: @NO,
-        // Both option sections visible by default (no change for existing users).
+        // Input options shown by default (common case); output options hidden by
+        // default (rare case — users opt in via "Show Output Options").
         kPrefShowInputOptions: @YES,
-        kPrefShowOutputOptions: @YES,
+        kPrefShowOutputOptions: @NO,
+        // Neither lock paused by default.
+        kPrefInputPaused: @NO,
+        kPrefOutputPaused: @NO,
     }];
 
     inputLock = [[AudioLock alloc] initWithDirection:AudioLockDirectionInput
@@ -207,15 +218,13 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
                                       defaultsNameKey:kPrefOutputDeviceName];
     [outputLock loadFromDefaults];
 
-    // A direction that was hidden in a previous session starts paused so it
-    // doesn't force on launch. pausedBeforeHide stays NO, so showing it again
-    // resumes forcing (the user can't have manually paused a hidden section).
-    if (![prefs boolForKey:kPrefShowInputOptions]) {
-        inputLock.paused = YES;
-    }
-    if (![prefs boolForKey:kPrefShowOutputOptions]) {
-        outputLock.paused = YES;
-    }
+    // Runtime pause state = persisted pause preference OR section hidden. A
+    // hidden direction is always paused (so it doesn't force while hidden); a
+    // visible one reflects the user's saved pause choice. Both survive relaunch.
+    inputLock.paused = [prefs boolForKey:kPrefInputPaused]
+                       || ![prefs boolForKey:kPrefShowInputOptions];
+    outputLock.paused = [prefs boolForKey:kPrefOutputPaused]
+                        || ![prefs boolForKey:kPrefShowOutputOptions];
 
     [self requestNotificationAuthorizationIfNeeded];
 
@@ -723,13 +732,18 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 
 - ( void ) manualPauseInput : ( NSMenuItem* ) item
 {
-    inputLock.paused = !inputLock.paused;
+    BOOL paused = !inputLock.paused;
+    inputLock.paused = paused;
+    // Persist the user's pause preference (the section is visible here).
+    [[NSUserDefaults standardUserDefaults] setBool:paused forKey:kPrefInputPaused];
     [ self listDevices ];
 }
 
 - ( void ) manualPauseOutput : ( NSMenuItem* ) item
 {
-    outputLock.paused = !outputLock.paused;
+    BOOL paused = !outputLock.paused;
+    outputLock.paused = paused;
+    [[NSUserDefaults standardUserDefaults] setBool:paused forKey:kPrefOutputPaused];
     [ self listDevices ];
 }
 
@@ -920,20 +934,22 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 }
 
 // Show/hide a direction's options. Hiding removes the section from the menu and
-// pauses the lock (stashing its prior pause state); showing restores both the
-// section and the prior pause state. listDevices rebuilds the menu and re-applies
-// (or stops) forcing based on the lock's new paused value.
-- (void)setShowOptions:(BOOL)show forLock:(AudioLock *)lock prefKey:(NSString *)prefKey
+// force-pauses the lock so it stops forcing — but leaves the persisted pause
+// *preference* untouched. Showing restores the lock to that preference. Both the
+// show flag and the pause preference persist across launches.
+- (void)setShowOptions:(BOOL)show forLock:(AudioLock *)lock
+            showPrefKey:(NSString *)showPrefKey
+           pausePrefKey:(NSString *)pausePrefKey
 {
     NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
-    [prefs setBool:show forKey:prefKey];
+    [prefs setBool:show forKey:showPrefKey];
 
     if (show) {
-        // Restore the pause state the user had before hiding.
-        lock.paused = lock.pausedBeforeHide;
+        // Restore the persisted pause preference for this direction.
+        lock.paused = [prefs boolForKey:pausePrefKey];
     } else {
-        // Remember the current pause state, then pause to stop forcing.
-        lock.pausedBeforeHide = lock.paused;
+        // Force-pause at runtime to stop forcing; the persisted preference is
+        // left as-is so showing again returns to the user's real choice.
         lock.paused = YES;
     }
 
@@ -943,13 +959,17 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 - (void)toggleShowInput
 {
     BOOL show = ![[NSUserDefaults standardUserDefaults] boolForKey:kPrefShowInputOptions];
-    [self setShowOptions:show forLock:inputLock prefKey:kPrefShowInputOptions];
+    [self setShowOptions:show forLock:inputLock
+              showPrefKey:kPrefShowInputOptions
+             pausePrefKey:kPrefInputPaused];
 }
 
 - (void)toggleShowOutput
 {
     BOOL show = ![[NSUserDefaults standardUserDefaults] boolForKey:kPrefShowOutputOptions];
-    [self setShowOptions:show forLock:outputLock prefKey:kPrefShowOutputOptions];
+    [self setShowOptions:show forLock:outputLock
+              showPrefKey:kPrefShowOutputOptions
+             pausePrefKey:kPrefOutputPaused];
 }
 
 - (void)requestNotificationAuthorizationIfNeeded

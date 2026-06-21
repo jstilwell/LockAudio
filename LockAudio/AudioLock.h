@@ -30,13 +30,10 @@ typedef NS_ENUM(NSUInteger, AudioLockDirection) {
 /// disconnect/reconnect (the AudioDeviceID can change).
 @property (nonatomic, copy, nullable) NSString *forcedName;
 
-/// When YES, forcing is temporarily disabled for this direction.
+/// When YES, forcing is temporarily disabled for this direction. This is the
+/// runtime state; the persisted pause *preference* lives in NSUserDefaults
+/// (AppDelegate owns it, since it interacts with the show/hide toggles).
 @property (nonatomic) BOOL paused;
-
-/// Stashed `paused` value from just before this direction's menu section was
-/// hidden, so that showing it again can restore the user's prior pause choice
-/// (hiding always pauses; showing restores this).
-@property (nonatomic) BOOL pausedBeforeHide;
 
 /// Designated initializer. `defaultsKey` / `defaultsNameKey` are the
 /// NSUserDefaults keys used to persist the device id and name.
