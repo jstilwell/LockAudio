@@ -26,6 +26,13 @@ static NSString* const kPrefInputDeviceName = @"DeviceName";
 static NSString* const kPrefOutputDevice = @"OutputDevice";
 static NSString* const kPrefOutputDeviceName = @"OutputDeviceName";
 
+// Per-direction "show these options in the menu" toggles. When a direction is
+// hidden its whole menu section is removed and its lock is paused; showing it
+// again restores the lock's prior pause state. Both default ON so existing
+// installs are unaffected.
+static NSString* const kPrefShowInputOptions = @"ShowInputOptions";
+static NSString* const kPrefShowOutputOptions = @"ShowOutputOptions";
+
 // Persisted launch-at-login state. The app's actual login-item registration
 // lives in SMAppService (queried live by GBLaunchAtLogin), but we also mirror
 // it here so the preference is migratable across a future bundle-identifier
@@ -51,6 +58,8 @@ static const NSTimeInterval kMinNotificationGap = 2.0;
     NSMenuItem *startupItem;
     NSMenuItem *notificationsItem;
     NSMenuItem *outputNotificationsItem;
+    NSMenuItem *showInputItem;
+    NSMenuItem *showOutputItem;
     BOOL rebuildingMenu;
     // Suppress the next forced-device notification for a direction after a
     // user-initiated switch (the callback can briefly see the old default and
@@ -183,6 +192,9 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
         // Output locking is opt-in: notifications default off and no output
         // device is forced until the user chooses one.
         kPrefOutputNotificationsEnabled: @NO,
+        // Both option sections visible by default (no change for existing users).
+        kPrefShowInputOptions: @YES,
+        kPrefShowOutputOptions: @YES,
     }];
 
     inputLock = [[AudioLock alloc] initWithDirection:AudioLockDirectionInput
@@ -194,6 +206,16 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
                                           defaultsKey:kPrefOutputDevice
                                       defaultsNameKey:kPrefOutputDeviceName];
     [outputLock loadFromDefaults];
+
+    // A direction that was hidden in a previous session starts paused so it
+    // doesn't force on launch. pausedBeforeHide stays NO, so showing it again
+    // resumes forcing (the user can't have manually paused a hidden section).
+    if (![prefs boolForKey:kPrefShowInputOptions]) {
+        inputLock.paused = YES;
+    }
+    if (![prefs boolForKey:kPrefShowOutputOptions]) {
+        outputLock.paused = YES;
+    }
 
     [self requestNotificationAuthorizationIfNeeded];
 
@@ -316,49 +338,83 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     NSString *versionString = [ NSString stringWithFormat : @"Version %@",
                                bundleInfo[ @"CFBundleShortVersionString" ] ];
 
+    NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
+    BOOL showInput = [prefs boolForKey:kPrefShowInputOptions];
+    BOOL showOutput = [prefs boolForKey:kPrefShowOutputOptions];
+
     menu = [ [ NSMenu alloc ] init ];
     menu.delegate = self;
     [ menu addItemWithTitle : versionString action : nil keyEquivalent : @"" ];
     [ menu addItem : [ NSMenuItem separatorItem ] ]; // A thin grey line
 
-    // Input section (label, device list, per-direction pause)
-    [ menu addItemWithTitle : @"Forced input:" action : nil keyEquivalent : @"" ];
-    [ self appendDevicesForLock : inputLock toMenu : menu ];
+    // These per-section items only exist when their section is shown; they stay
+    // nil otherwise (setting .image / .state on nil is a harmless no-op).
+    NSMenuItem* pauseInput = nil;
+    NSMenuItem* pauseOutput = nil;
+    notificationsItem = nil;
+    outputNotificationsItem = nil;
 
-    NSMenuItem* pauseInput = [ menu
-            addItemWithTitle : @"Pause Input Lock"
-            action : @selector(manualPauseInput:)
-            keyEquivalent : @"" ];
-    if ( inputLock.paused ) [ pauseInput setState : NSControlStateValueOn ];
+    // Input section (label, device list, per-direction pause) — only when shown.
+    if ( showInput )
+    {
+        [ menu addItemWithTitle : @"Forced input:" action : nil keyEquivalent : @"" ];
+        [ self appendDevicesForLock : inputLock toMenu : menu ];
 
-    [ menu addItem : [ NSMenuItem separatorItem ] ]; // A thin grey line
+        pauseInput = [ menu
+                addItemWithTitle : @"Pause Input Lock"
+                action : @selector(manualPauseInput:)
+                keyEquivalent : @"" ];
+        if ( inputLock.paused ) [ pauseInput setState : NSControlStateValueOn ];
 
-    // Output section (label, device list, per-direction pause)
-    [ menu addItemWithTitle : @"Forced output:" action : nil keyEquivalent : @"" ];
-    [ self appendDevicesForLock : outputLock toMenu : menu ];
+        [ menu addItem : [ NSMenuItem separatorItem ] ]; // A thin grey line
+    }
 
-    NSMenuItem* pauseOutput = [ menu
-            addItemWithTitle : @"Pause Output Lock"
-            action : @selector(manualPauseOutput:)
-            keyEquivalent : @"" ];
-    if ( outputLock.paused ) [ pauseOutput setState : NSControlStateValueOn ];
+    // Output section (label, device list, per-direction pause) — only when shown.
+    if ( showOutput )
+    {
+        [ menu addItemWithTitle : @"Forced output:" action : nil keyEquivalent : @"" ];
+        [ self appendDevicesForLock : outputLock toMenu : menu ];
 
-    [ menu addItem : [ NSMenuItem separatorItem ] ]; // A thin grey line
+        pauseOutput = [ menu
+                addItemWithTitle : @"Pause Output Lock"
+                action : @selector(manualPauseOutput:)
+                keyEquivalent : @"" ];
+        if ( outputLock.paused ) [ pauseOutput setState : NSControlStateValueOn ];
+
+        [ menu addItem : [ NSMenuItem separatorItem ] ]; // A thin grey line
+    }
 
     startupItem = [ menu
         addItemWithTitle : @"Open at login"
         action : @selector(toggleStartupItem)
         keyEquivalent : @"" ];
 
-    notificationsItem = [ menu
-        addItemWithTitle : @"Notify on forced input"
-        action : @selector(toggleNotifications)
+    showInputItem = [ menu
+        addItemWithTitle : @"Show Input Options"
+        action : @selector(toggleShowInput)
         keyEquivalent : @"" ];
 
-    outputNotificationsItem = [ menu
-        addItemWithTitle : @"Notify on forced output"
-        action : @selector(toggleOutputNotifications)
+    showOutputItem = [ menu
+        addItemWithTitle : @"Show Output Options"
+        action : @selector(toggleShowOutput)
         keyEquivalent : @"" ];
+
+    // Notify toggles only appear when their section is shown.
+    if ( showInput )
+    {
+        notificationsItem = [ menu
+            addItemWithTitle : @"Notify on forced input"
+            action : @selector(toggleNotifications)
+            keyEquivalent : @"" ];
+    }
+
+    if ( showOutput )
+    {
+        outputNotificationsItem = [ menu
+            addItemWithTitle : @"Notify on forced output"
+            action : @selector(toggleOutputNotifications)
+            keyEquivalent : @"" ];
+    }
 
     [ menu addItem : [ NSMenuItem separatorItem ] ]; // A thin grey line
 
@@ -389,6 +445,8 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
         pauseInput.image = [NSImage imageWithSystemSymbolName:@"pause.circle" accessibilityDescription:@"Pause Input Lock"];
         pauseOutput.image = [NSImage imageWithSystemSymbolName:@"pause.circle" accessibilityDescription:@"Pause Output Lock"];
         startupItem.image = [NSImage imageWithSystemSymbolName:@"power" accessibilityDescription:@"Open at login"];
+        showInputItem.image = [NSImage imageWithSystemSymbolName:@"mic" accessibilityDescription:@"Show Input Options"];
+        showOutputItem.image = [NSImage imageWithSystemSymbolName:@"speaker.wave.2" accessibilityDescription:@"Show Output Options"];
         notificationsItem.image = [NSImage imageWithSystemSymbolName:@"bell" accessibilityDescription:@"Notify on forced input"];
         outputNotificationsItem.image = [NSImage imageWithSystemSymbolName:@"bell" accessibilityDescription:@"Notify on forced output"];
         soundItem.image = [NSImage imageWithSystemSymbolName:@"gearshape" accessibilityDescription:@"Sound settings"];
@@ -835,6 +893,8 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
     [notificationsItem setState: [prefs boolForKey:kPrefNotificationsEnabled] ? NSControlStateValueOn : NSControlStateValueOff];
     [outputNotificationsItem setState: [prefs boolForKey:kPrefOutputNotificationsEnabled] ? NSControlStateValueOn : NSControlStateValueOff];
+    [showInputItem setState: [prefs boolForKey:kPrefShowInputOptions] ? NSControlStateValueOn : NSControlStateValueOff];
+    [showOutputItem setState: [prefs boolForKey:kPrefShowOutputOptions] ? NSControlStateValueOn : NSControlStateValueOff];
 }
 
 - (void)toggleNotifications
@@ -857,6 +917,39 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     if (enabled) {
         [self requestNotificationAuthorizationIfNeeded];
     }
+}
+
+// Show/hide a direction's options. Hiding removes the section from the menu and
+// pauses the lock (stashing its prior pause state); showing restores both the
+// section and the prior pause state. listDevices rebuilds the menu and re-applies
+// (or stops) forcing based on the lock's new paused value.
+- (void)setShowOptions:(BOOL)show forLock:(AudioLock *)lock prefKey:(NSString *)prefKey
+{
+    NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
+    [prefs setBool:show forKey:prefKey];
+
+    if (show) {
+        // Restore the pause state the user had before hiding.
+        lock.paused = lock.pausedBeforeHide;
+    } else {
+        // Remember the current pause state, then pause to stop forcing.
+        lock.pausedBeforeHide = lock.paused;
+        lock.paused = YES;
+    }
+
+    [self listDevices];
+}
+
+- (void)toggleShowInput
+{
+    BOOL show = ![[NSUserDefaults standardUserDefaults] boolForKey:kPrefShowInputOptions];
+    [self setShowOptions:show forLock:inputLock prefKey:kPrefShowInputOptions];
+}
+
+- (void)toggleShowOutput
+{
+    BOOL show = ![[NSUserDefaults standardUserDefaults] boolForKey:kPrefShowOutputOptions];
+    [self setShowOptions:show forLock:outputLock prefKey:kPrefShowOutputOptions];
 }
 
 - (void)requestNotificationAuthorizationIfNeeded
