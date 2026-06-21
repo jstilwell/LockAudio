@@ -7,10 +7,10 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-PROJECT_NAME="Mac Audio Input Locker"
-PROJECT_FILE="Mac Audio Input Locker.xcodeproj"
-SCHEME="Mac Audio Input Locker"
-APP_NAME="Mac Audio Input Locker.app"
+PROJECT_NAME="LockAudio"
+PROJECT_FILE="LockAudio.xcodeproj"
+SCHEME="LockAudio"
+APP_NAME="LockAudio.app"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
@@ -51,4 +51,4 @@ echo -e "${GREEN}Running.${NC} Watch the menu bar for the AirPods icon."
 echo
 echo "Live logs (Ctrl+C to stop tailing — the app keeps running):"
 echo "---"
-log stream --predicate 'process == "Mac Audio Input Locker"' --level debug
+log stream --predicate 'process == "LockAudio"' --level debug
