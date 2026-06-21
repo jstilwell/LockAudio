@@ -1,5 +1,6 @@
 #import "AppDelegate.h"
 #import "GBLaunchAtLogin.h"
+#import "AudioLock.h"
 #import <CoreAudio/CoreAudio.h>
 #import <UserNotifications/UserNotifications.h>
 
@@ -13,7 +14,17 @@
 }
 @end
 
+// Notify-on-forced toggles, one per direction. The input key keeps its original
+// name ("NotificationsEnabled") for backward compatibility with existing installs.
 static NSString* const kPrefNotificationsEnabled = @"NotificationsEnabled";
+static NSString* const kPrefOutputNotificationsEnabled = @"OutputNotificationsEnabled";
+
+// NSUserDefaults keys for the forced device id/name, per direction. The input
+// keys keep their original names ("Device"/"DeviceName") for backward compat.
+static NSString* const kPrefInputDevice = @"Device";
+static NSString* const kPrefInputDeviceName = @"DeviceName";
+static NSString* const kPrefOutputDevice = @"OutputDevice";
+static NSString* const kPrefOutputDeviceName = @"OutputDeviceName";
 
 // Persisted launch-at-login state. The app's actual login-item registration
 // lives in SMAppService (queried live by GBLaunchAtLogin), but we also mirror
@@ -25,25 +36,29 @@ static NSString* const kPrefLaunchAtLogin = @"LaunchAtLogin";
 // launch under the new identifier, to migrate the user's saved settings.
 static NSString* const kLegacyBundleIdentifier = @"com.audio.locker";
 
-// Minimum gap between forced-input notifications. Under this threshold we
-// treat successive fires as CoreAudio churn (e.g. AirPods settling) and
-// suppress; legitimate user-driven switches always exceed this easily.
+// Minimum gap between forced-device notifications (per direction). Under this
+// threshold we treat successive fires as CoreAudio churn (e.g. AirPods settling)
+// and suppress; legitimate user-driven switches always exceed this easily.
 static const NSTimeInterval kMinNotificationGap = 2.0;
 
 
 @interface AppDelegate ( )
 {
-    BOOL paused;
     NSMenu* menu;
     NSStatusItem* statusItem;
-    AudioDeviceID forcedInputID;
-    NSString* forcedInputName;
-    NSMutableDictionary* itemsToIDS;
+    AudioLock* inputLock;
+    AudioLock* outputLock;
     NSMenuItem *startupItem;
     NSMenuItem *notificationsItem;
+    NSMenuItem *outputNotificationsItem;
     BOOL rebuildingMenu;
-    BOOL suppressNextForceNotification;
-    NSDate* lastNotificationTime;
+    // Suppress the next forced-device notification for a direction after a
+    // user-initiated switch (the callback can briefly see the old default and
+    // re-force, which would otherwise fire a misleading notification).
+    BOOL suppressNextInputNotification;
+    BOOL suppressNextOutputNotification;
+    NSDate* lastInputNotificationTime;
+    NSDate* lastOutputNotificationTime;
     BOOL notificationAuthGranted;
     BOOL screenLocked;
     NSWindow* aboutWindow;
@@ -64,7 +79,7 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
                             void *inClientData)
 {
 
-    NSLog( @"default input device changed" );
+    NSLog( @"default device changed" );
     AppDelegate *delegate = (__bridge AppDelegate *)inClientData;
     dispatch_async(dispatch_get_main_queue(), ^{
         [delegate listDevices];
@@ -140,8 +155,8 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     // Initialize Sparkle updater
     self.updaterController = [[SPUStandardUpdaterController alloc] initWithStartingUpdater:YES updaterDelegate:nil userDriverDelegate:nil];
 
-    itemsToIDS = [ NSMutableDictionary dictionary ];
-    lastNotificationTime = nil;
+    lastInputNotificationTime = nil;
+    lastOutputNotificationTime = nil;
     notificationAuthGranted = NO;
     screenLocked = NO;
 
@@ -165,20 +180,26 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
     [prefs registerDefaults:@{
         kPrefNotificationsEnabled: @YES,
+        // Output locking is opt-in: notifications default off and no output
+        // device is forced until the user chooses one.
+        kPrefOutputNotificationsEnabled: @NO,
     }];
 
-    NSInteger readenId = [prefs integerForKey: @"Device"];
+    inputLock = [[AudioLock alloc] initWithDirection:AudioLockDirectionInput
+                                         defaultsKey:kPrefInputDevice
+                                     defaultsNameKey:kPrefInputDeviceName];
+    [inputLock loadFromDefaults];
 
-    if (readenId == 0) {
-        [prefs setInteger:UINT32_MAX forKey: @"Device"];
-    }
-
-    forcedInputID = (AudioDeviceID)readenId;
-    forcedInputName = [prefs stringForKey: @"DeviceName"];
+    outputLock = [[AudioLock alloc] initWithDirection:AudioLockDirectionOutput
+                                          defaultsKey:kPrefOutputDevice
+                                      defaultsNameKey:kPrefOutputDeviceName];
+    [outputLock loadFromDefaults];
 
     [self requestNotificationAuthorizationIfNeeded];
 
-    NSLog(@"Loaded device from UserDefaults: %d (name: %@)", forcedInputID, forcedInputName);
+    NSLog(@"Loaded input lock: %d (%@), output lock: %d (%@)",
+          inputLock.forcedID, inputLock.forcedName,
+          outputLock.forcedID, outputLock.forcedName);
 
     NSImage* image = [ NSImage imageNamed : @"airpods-icon" ];
     [ image setTemplate : YES ];
@@ -187,17 +208,18 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     statusItem.button.toolTip = @"LockAudio";
     statusItem.button.image = image;
 
-    // add listener for detecting when input device is changed
-
-    AudioObjectPropertyAddress inputDeviceAddress = {
-        kAudioHardwarePropertyDefaultInputDevice,
-        kAudioObjectPropertyScopeGlobal,
-        kAudioObjectPropertyElementMain
-    };
-
+    // Listen for changes to the default input and output devices.
+    AudioObjectPropertyAddress inputDeviceAddress = [inputLock defaultDeviceListenerAddress];
     AudioObjectAddPropertyListener(
         kAudioObjectSystemObject,
         &inputDeviceAddress,
+        &callbackFunction,
+        (__bridge  void* ) self );
+
+    AudioObjectPropertyAddress outputDeviceAddress = [outputLock defaultDeviceListenerAddress];
+    AudioObjectAddPropertyListener(
+        kAudioObjectSystemObject,
+        &outputDeviceAddress,
         &callbackFunction,
         (__bridge  void* ) self );
 
@@ -240,52 +262,45 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 
 - ( void ) deviceSelected : ( NSMenuItem* ) item
 {
-
-    NSNumber* number = itemsToIDS[ item.title ];
-
-    if ( number != nil )
+    // Each device menu item is tagged with @[ @(direction), @(deviceID) ] so we
+    // know which lock the click targets (a device like AirPods can appear in
+    // both the input and output lists).
+    NSArray *tag = item.representedObject;
+    if ( ![tag isKindOfClass:[NSArray class]] || tag.count != 2 )
     {
-
-        AudioDeviceID newId = [ number unsignedIntValue ];
-
-        NSLog( @"switching to new device : %u" , newId );
-
-        forcedInputID = newId;
-
-        forcedInputName = item.title;
-
-        // User-initiated switch: don't notify when the force-set path runs
-        // during the follow-up listDevices (the CoreAudio callback can see
-        // the old default briefly and re-force, which would otherwise fire
-        // a misleading "Forced input active" notification).
-        suppressNextForceNotification = YES;
-
-        NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
-        [prefs setInteger:newId forKey: @"Device"];
-        [prefs setObject:forcedInputName forKey: @"DeviceName"];
-        NSLog(@"Saved device to UserDefaults: %d (name: %@)", forcedInputID, forcedInputName);
-
-        AudioObjectPropertyAddress propertyAddress = {
-            kAudioHardwarePropertyDefaultInputDevice,
-            kAudioObjectPropertyScopeGlobal,
-            kAudioObjectPropertyElementMain
-        };
-        UInt32 propertySize = sizeof(AudioDeviceID);
-        AudioObjectSetPropertyData(
-            kAudioObjectSystemObject,
-            &propertyAddress,
-            0,
-            NULL,
-            propertySize,
-            &forcedInputID);
-
-        // Rebuild menu to show updated selection
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [self listDevices];
-        });
-
+        return;
     }
 
+    AudioLockDirection direction = (AudioLockDirection)[tag[0] unsignedIntegerValue];
+    AudioDeviceID newId = (AudioDeviceID)[tag[1] unsignedIntValue];
+
+    AudioLock *lock = (direction == AudioLockDirectionInput) ? inputLock : outputLock;
+
+    NSLog( @"switching %@ to new device : %u",
+           direction == AudioLockDirectionInput ? @"input" : @"output", newId );
+
+    lock.forcedID = newId;
+    lock.forcedName = item.title;
+
+    // User-initiated switch: suppress the next forced notification for this
+    // direction (see suppressNext*Notification).
+    if ( direction == AudioLockDirectionInput ) {
+        suppressNextInputNotification = YES;
+    } else {
+        suppressNextOutputNotification = YES;
+    }
+
+    [lock saveToDefaults];
+    NSLog(@"Saved %@ device: %d (name: %@)",
+          direction == AudioLockDirectionInput ? @"input" : @"output",
+          lock.forcedID, lock.forcedName);
+
+    [lock applyForce:newId];
+
+    // Rebuild menu to show updated selection
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self listDevices];
+    });
 }
 
 
@@ -301,318 +316,32 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     NSString *versionString = [ NSString stringWithFormat : @"Version %@",
                                bundleInfo[ @"CFBundleShortVersionString" ] ];
 
-    [ itemsToIDS removeAllObjects ];
-
     menu = [ [ NSMenu alloc ] init ];
     menu.delegate = self;
     [ menu addItemWithTitle : versionString action : nil keyEquivalent : @"" ];
     [ menu addItem : [ NSMenuItem separatorItem ] ]; // A thin grey line
 
-    NSMenuItem* item =  [ menu
-            addItemWithTitle : NSLocalizedString(@"Pause", @"Pause")
-            action : @selector(manualPause:)
-            keyEquivalent : @"" ];
+    // Input section (label, device list, per-direction pause)
+    [ menu addItemWithTitle : @"Forced input:" action : nil keyEquivalent : @"" ];
+    [ self appendDevicesForLock : inputLock toMenu : menu ];
 
-    if ( paused ) [ item setState : NSControlStateValueOn ];
+    NSMenuItem* pauseInput = [ menu
+            addItemWithTitle : @"Pause input"
+            action : @selector(manualPauseInput:)
+            keyEquivalent : @"" ];
+    if ( inputLock.paused ) [ pauseInput setState : NSControlStateValueOn ];
 
     [ menu addItem : [ NSMenuItem separatorItem ] ]; // A thin grey line
-    [ menu addItemWithTitle : @"Forced input:" action : nil keyEquivalent : @"" ];
 
-    UInt32 propertySize;
-
-    // Get device count dynamically
-    AudioObjectPropertyAddress devicesAddress = {
-        kAudioHardwarePropertyDevices,
-        kAudioObjectPropertyScopeGlobal,
-        kAudioObjectPropertyElementMain
-    };
-
-    AudioObjectGetPropertyDataSize(
-        kAudioObjectSystemObject,
-        &devicesAddress,
-        0,
-        NULL,
-        &propertySize);
-
-    int numberOfDevices = ( propertySize / sizeof( AudioDeviceID ) );
-    AudioDeviceID *dev_array = (AudioDeviceID *)malloc(propertySize);
-
-    AudioObjectGetPropertyData(
-        kAudioObjectSystemObject,
-        &devicesAddress,
-        0,
-        NULL,
-        &propertySize,
-        dev_array);
-
-    NSLog( @"devices found : %i" , numberOfDevices );
-
-    BOOL forcedDeviceAvailable = NO;
-
-    if ( forcedInputID < UINT32_MAX )
-    {
-
-        char found = 0;
-
-        for( int index = 0 ;
-                 index < numberOfDevices ;
-                 index++ )
-        {
-
-            if ( dev_array[ index] == forcedInputID ) found = 1;
-
-        }
-
-        if ( found == 0 )
-        {
-            NSLog( @"force input not found by ID, searching by name: %@", forcedInputName );
-
-            // Device ID changed (e.g. reconnected) — try to find by name
-            if ( forcedInputName != nil )
-            {
-                for ( int index = 0; index < numberOfDevices; index++ )
-                {
-                    char deviceName[256];
-                    UInt32 nameSize = 256;
-
-                    AudioObjectPropertyAddress nameAddr = {
-                        kAudioDevicePropertyDeviceName,
-                        kAudioObjectPropertyScopeGlobal,
-                        kAudioObjectPropertyElementMain
-                    };
-
-                    AudioObjectGetPropertyData(
-                        dev_array[index],
-                        &nameAddr,
-                        0,
-                        NULL,
-                        &nameSize,
-                        deviceName);
-
-                    NSString* nameStr = [ NSString stringWithUTF8String : deviceName ];
-
-                    if ( [ nameStr isEqualToString : forcedInputName ] )
-                    {
-                        NSLog( @"force input recovered by name: %@ -> %u", nameStr, (unsigned int)dev_array[index] );
-                        forcedInputID = dev_array[index];
-
-                        NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
-                        [prefs setInteger:forcedInputID forKey: @"Device"];
-
-                        found = 1;
-                        forcedDeviceAvailable = YES;
-                        break;
-                    }
-                }
-            }
-
-            if ( found == 0 )
-            {
-                NSLog( @"force input not found in device list" );
-                // Don't reset — keep the name so we can recover later
-            }
-        }
-        else
-        {
-            NSLog( @"force input found in device list" );
-            forcedDeviceAvailable = YES;
-        }
-
-    }
-    else if ( forcedInputName != nil )
-    {
-        // forcedInputID is UINT32_MAX but we have a saved name — device was
-        // previously disconnected, try to find it again
-        for ( int index = 0; index < numberOfDevices; index++ )
-        {
-            char deviceName[256];
-            UInt32 nameSize = 256;
-
-            AudioObjectPropertyAddress nameAddr = {
-                kAudioDevicePropertyDeviceName,
-                kAudioObjectPropertyScopeGlobal,
-                kAudioObjectPropertyElementMain
-            };
-
-            AudioObjectGetPropertyData(
-                dev_array[index],
-                &nameAddr,
-                0,
-                NULL,
-                &nameSize,
-                deviceName);
-
-            NSString* nameStr = [ NSString stringWithUTF8String : deviceName ];
-
-            if ( [ nameStr isEqualToString : forcedInputName ] )
-            {
-                NSLog( @"force input restored from saved name: %@ -> %u", nameStr, (unsigned int)dev_array[index] );
-                forcedInputID = dev_array[index];
-
-                NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
-                [prefs setInteger:forcedInputID forKey: @"Device"];
-                forcedDeviceAvailable = YES;
-                break;
-            }
-        }
-    }
-
-
-    for( int index = 0 ;
-             index < numberOfDevices ;
-             index++ )
-    {
-
-        AudioDeviceID oneDeviceID = dev_array[ index ];
-
-        propertySize = 0;
-
-        AudioObjectPropertyAddress streamsAddress = {
-            kAudioDevicePropertyStreams,
-            kAudioDevicePropertyScopeInput,
-            kAudioObjectPropertyElementMain
-        };
-
-        AudioObjectGetPropertyDataSize(
-            oneDeviceID,
-            &streamsAddress,
-            0,
-            NULL,
-            &propertySize);
-
-        // if there are any input streams, then it is an input
-
-        if ( propertySize > 0 )
-        {
-
-            // get name
-            char deviceName[256];
-            propertySize = 256;
-
-            AudioObjectPropertyAddress nameAddress = {
-                kAudioDevicePropertyDeviceName,
-                kAudioObjectPropertyScopeGlobal,
-                kAudioObjectPropertyElementMain
-            };
-
-            AudioObjectGetPropertyData(
-                oneDeviceID,
-                &nameAddress,
-                0,
-                NULL,
-                &propertySize,
-                deviceName);
-
-            NSLog( @"found input device : %s  %u\n" , deviceName , (unsigned int)oneDeviceID );
-
-            NSString* nameStr = [ NSString stringWithUTF8String : deviceName ];
-
-            if ( [ [ nameStr lowercaseString ] containsString : @"built" ] && forcedInputID == UINT32_MAX && forcedInputName == nil )
-            {
-
-                // if there is no forced device yet and no saved preference, select "built-in" by default
-
-                NSLog( @"setting forced device : %s  %u\n" , deviceName , (unsigned int)oneDeviceID );
-
-                forcedInputID = oneDeviceID;
-                forcedInputName = nameStr;
-                forcedDeviceAvailable = YES;
-
-                NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
-                [prefs setObject:forcedInputName forKey: @"DeviceName"];
-
-            }
-
-            NSMenuItem* item = [ menu
-                addItemWithTitle : [ NSString stringWithUTF8String : deviceName ]
-                action : @selector(deviceSelected:)
-                keyEquivalent : @"" ];
-
-            if ( oneDeviceID == forcedInputID )
-            {
-                [ item setState : NSControlStateValueOn ];
-                NSLog( @"setting device selected : %s  %u\n" , deviceName , (unsigned int)oneDeviceID );
-            }
-
-            itemsToIDS[ nameStr ] = [ NSNumber numberWithUnsignedInt : oneDeviceID];
-
-        }
-
-    }
-
-    free(dev_array);
-
-    [ statusItem setMenu : menu ];
-
-    // Force input device if needed (the callback will trigger another listDevices)
-
-    AudioDeviceID deviceID = kAudioDeviceUnknown;
-    propertySize = sizeof( deviceID );
-
-    AudioObjectPropertyAddress defaultInputAddress = {
-        kAudioHardwarePropertyDefaultInputDevice,
-        kAudioObjectPropertyScopeGlobal,
-        kAudioObjectPropertyElementMain
-    };
-
-    AudioObjectGetPropertyData(
-        kAudioObjectSystemObject,
-        &defaultInputAddress,
-        0,
-        NULL,
-        &propertySize,
-        &deviceID);
-
-    NSLog( @"default input device is %u" , deviceID );
-
-    if ( !paused && forcedDeviceAvailable && deviceID != forcedInputID )
-    {
-
-        NSLog( @"forcing input device for default : %u" , forcedInputID );
-
-        NSArray *offendingNames = [itemsToIDS allKeysForObject:[NSNumber numberWithUnsignedInt:deviceID]];
-        NSString *offendingName = offendingNames.firstObject;
-
-        AudioObjectPropertyAddress forceInputAddress = {
-            kAudioHardwarePropertyDefaultInputDevice,
-            kAudioObjectPropertyScopeGlobal,
-            kAudioObjectPropertyElementMain
-        };
-        UInt32 forceSize = sizeof(AudioDeviceID);
-        OSStatus forceStatus = AudioObjectSetPropertyData(
-            kAudioObjectSystemObject,
-            &forceInputAddress,
-            0,
-            NULL,
-            forceSize,
-            &forcedInputID);
-
-        if ( forceStatus == noErr )
-        {
-            if ( suppressNextForceNotification )
-            {
-                NSLog( @"suppressing forced-input notification for user-initiated switch" );
-            }
-            else
-            {
-                [ self handleForceAppliedForDevice : forcedInputID
-                                              name : forcedInputName
-                                    offendingName : offendingName ];
-            }
-        }
-        else
-        {
-            NSLog( @"force input failed: OSStatus %d", (int)forceStatus );
-        }
-
-        // No need to dispatch listDevices here — the CoreAudio property
-        // listener callback will fire and call listDevices for us.
-
-    }
-    else if ( !paused && !forcedDeviceAvailable && forcedInputName != nil )
-    {
-        NSLog( @"skipping force: forced device '%@' is not connected", forcedInputName );
-    }
+    // Output section (label, device list, per-direction pause)
+    [ menu addItemWithTitle : @"Forced output:" action : nil keyEquivalent : @"" ];
+    [ self appendDevicesForLock : outputLock toMenu : menu ];
+
+    NSMenuItem* pauseOutput = [ menu
+            addItemWithTitle : @"Pause output"
+            action : @selector(manualPauseOutput:)
+            keyEquivalent : @"" ];
+    if ( outputLock.paused ) [ pauseOutput setState : NSControlStateValueOn ];
 
     [ menu addItem : [ NSMenuItem separatorItem ] ]; // A thin grey line
 
@@ -624,6 +353,11 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     notificationsItem = [ menu
         addItemWithTitle : @"Notify on forced input"
         action : @selector(toggleNotifications)
+        keyEquivalent : @"" ];
+
+    outputNotificationsItem = [ menu
+        addItemWithTitle : @"Notify on forced output"
+        action : @selector(toggleOutputNotifications)
         keyEquivalent : @"" ];
 
     [ menu addItem : [ NSMenuItem separatorItem ] ]; // A thin grey line
@@ -655,14 +389,281 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
         quitItem.image = [NSImage imageWithSystemSymbolName:@"xmark.circle" accessibilityDescription:@"Quit"];
     }
 
-    rebuildingMenu = NO;
-    suppressNextForceNotification = NO;
+    [ self updateToggleStates ];
+    [ self updateStartupItemState ];
 
+    [ statusItem setMenu : menu ];
+
+    rebuildingMenu = NO;
+    suppressNextInputNotification = NO;
+    suppressNextOutputNotification = NO;
 }
 
-- ( void ) manualPause : ( NSMenuItem* ) item
+
+// Resolves/recovers `lock`'s forced device, appends one menu item per
+// participating device (checkmark on the forced one), and re-applies the force
+// if another device has stolen the default. Ported from the original
+// single-direction listDevices logic.
+- ( void ) appendDevicesForLock : ( AudioLock* ) lock toMenu : ( NSMenu* ) targetMenu
 {
-    paused = !paused;
+    UInt32 propertySize;
+
+    // Get device count dynamically
+    AudioObjectPropertyAddress devicesAddress = {
+        kAudioHardwarePropertyDevices,
+        kAudioObjectPropertyScopeGlobal,
+        kAudioObjectPropertyElementMain
+    };
+
+    AudioObjectGetPropertyDataSize(
+        kAudioObjectSystemObject,
+        &devicesAddress,
+        0,
+        NULL,
+        &propertySize);
+
+    int numberOfDevices = ( propertySize / sizeof( AudioDeviceID ) );
+    AudioDeviceID *dev_array = (AudioDeviceID *)malloc(propertySize);
+
+    AudioObjectGetPropertyData(
+        kAudioObjectSystemObject,
+        &devicesAddress,
+        0,
+        NULL,
+        &propertySize,
+        dev_array);
+
+    NSLog( @"devices found : %i" , numberOfDevices );
+
+    BOOL isInput = ( lock.direction == AudioLockDirectionInput );
+    NSString *dirName = isInput ? @"input" : @"output";
+    BOOL forcedDeviceAvailable = NO;
+
+    // Maps deviceID -> name for the participating devices, used to name the
+    // "offending" device that stole the default.
+    NSMutableDictionary<NSNumber *, NSString *> *idToName = [NSMutableDictionary dictionary];
+
+    if ( lock.forcedID < UINT32_MAX )
+    {
+
+        char found = 0;
+
+        for( int index = 0 ;
+                 index < numberOfDevices ;
+                 index++ )
+        {
+
+            if ( dev_array[ index] == lock.forcedID ) found = 1;
+
+        }
+
+        if ( found == 0 )
+        {
+            NSLog( @"forced %@ not found by ID, searching by name: %@", dirName, lock.forcedName );
+
+            // Device ID changed (e.g. reconnected) — try to find by name
+            if ( lock.forcedName != nil )
+            {
+                for ( int index = 0; index < numberOfDevices; index++ )
+                {
+                    char deviceName[256];
+                    UInt32 nameSize = 256;
+
+                    AudioObjectPropertyAddress nameAddr = {
+                        kAudioDevicePropertyDeviceName,
+                        kAudioObjectPropertyScopeGlobal,
+                        kAudioObjectPropertyElementMain
+                    };
+
+                    AudioObjectGetPropertyData(
+                        dev_array[index],
+                        &nameAddr,
+                        0,
+                        NULL,
+                        &nameSize,
+                        deviceName);
+
+                    NSString* nameStr = [ NSString stringWithUTF8String : deviceName ];
+
+                    if ( [ nameStr isEqualToString : lock.forcedName ] )
+                    {
+                        NSLog( @"forced %@ recovered by name: %@ -> %u", dirName, nameStr, (unsigned int)dev_array[index] );
+                        lock.forcedID = dev_array[index];
+                        [lock saveToDefaults];
+
+                        found = 1;
+                        forcedDeviceAvailable = YES;
+                        break;
+                    }
+                }
+            }
+
+            if ( found == 0 )
+            {
+                NSLog( @"forced %@ not found in device list", dirName );
+                // Don't reset — keep the name so we can recover later
+            }
+        }
+        else
+        {
+            NSLog( @"forced %@ found in device list", dirName );
+            forcedDeviceAvailable = YES;
+        }
+
+    }
+    else if ( lock.forcedName != nil )
+    {
+        // forcedID is UINT32_MAX but we have a saved name — device was
+        // previously disconnected, try to find it again
+        for ( int index = 0; index < numberOfDevices; index++ )
+        {
+            char deviceName[256];
+            UInt32 nameSize = 256;
+
+            AudioObjectPropertyAddress nameAddr = {
+                kAudioDevicePropertyDeviceName,
+                kAudioObjectPropertyScopeGlobal,
+                kAudioObjectPropertyElementMain
+            };
+
+            AudioObjectGetPropertyData(
+                dev_array[index],
+                &nameAddr,
+                0,
+                NULL,
+                &nameSize,
+                deviceName);
+
+            NSString* nameStr = [ NSString stringWithUTF8String : deviceName ];
+
+            if ( [ nameStr isEqualToString : lock.forcedName ] )
+            {
+                NSLog( @"forced %@ restored from saved name: %@ -> %u", dirName, nameStr, (unsigned int)dev_array[index] );
+                lock.forcedID = dev_array[index];
+                [lock saveToDefaults];
+                forcedDeviceAvailable = YES;
+                break;
+            }
+        }
+    }
+
+
+    for( int index = 0 ;
+             index < numberOfDevices ;
+             index++ )
+    {
+
+        AudioDeviceID oneDeviceID = dev_array[ index ];
+
+        // Only list devices that participate in this lock's direction.
+        if ( ![ lock deviceParticipates : oneDeviceID ] )
+        {
+            continue;
+        }
+
+        // get name
+        char deviceName[256];
+        propertySize = 256;
+
+        AudioObjectPropertyAddress nameAddress = {
+            kAudioDevicePropertyDeviceName,
+            kAudioObjectPropertyScopeGlobal,
+            kAudioObjectPropertyElementMain
+        };
+
+        AudioObjectGetPropertyData(
+            oneDeviceID,
+            &nameAddress,
+            0,
+            NULL,
+            &propertySize,
+            deviceName);
+
+        NSLog( @"found %@ device : %s  %u\n" , dirName, deviceName , (unsigned int)oneDeviceID );
+
+        NSString* nameStr = [ NSString stringWithUTF8String : deviceName ];
+
+        // Default the INPUT lock to the built-in device when nothing is saved.
+        // Output locking is opt-in, so it has no default device.
+        if ( isInput && [ [ nameStr lowercaseString ] containsString : @"built" ]
+             && lock.forcedID == UINT32_MAX && lock.forcedName == nil )
+        {
+            NSLog( @"setting default forced %@ : %s  %u\n" , dirName, deviceName , (unsigned int)oneDeviceID );
+
+            lock.forcedID = oneDeviceID;
+            lock.forcedName = nameStr;
+            forcedDeviceAvailable = YES;
+            [lock saveToDefaults];
+        }
+
+        NSMenuItem* item = [ targetMenu
+            addItemWithTitle : nameStr
+            action : @selector(deviceSelected:)
+            keyEquivalent : @"" ];
+        item.representedObject = @[ @(lock.direction), @((unsigned int)oneDeviceID) ];
+
+        if ( oneDeviceID == lock.forcedID )
+        {
+            [ item setState : NSControlStateValueOn ];
+            NSLog( @"%@ device selected : %s  %u\n" , dirName, deviceName , (unsigned int)oneDeviceID );
+        }
+
+        idToName[ @((unsigned int)oneDeviceID) ] = nameStr;
+    }
+
+    free(dev_array);
+
+    // Force the device if needed (the callback will trigger another listDevices)
+    AudioDeviceID deviceID = [ lock currentDefaultDevice ];
+    NSLog( @"default %@ device is %u" , dirName, deviceID );
+
+    if ( !lock.paused && forcedDeviceAvailable && deviceID != lock.forcedID )
+    {
+        NSLog( @"forcing %@ device for default : %u" , dirName, lock.forcedID );
+
+        NSString *offendingName = idToName[ @((unsigned int)deviceID) ];
+
+        OSStatus forceStatus = [ lock applyForce : lock.forcedID ];
+
+        BOOL suppress = isInput ? suppressNextInputNotification : suppressNextOutputNotification;
+
+        if ( forceStatus == noErr )
+        {
+            if ( suppress )
+            {
+                NSLog( @"suppressing forced-%@ notification for user-initiated switch", dirName );
+            }
+            else
+            {
+                [ self handleForceAppliedForLock : lock
+                                            name : lock.forcedName
+                                   offendingName : offendingName ];
+            }
+        }
+        else
+        {
+            NSLog( @"force %@ failed: OSStatus %d", dirName, (int)forceStatus );
+        }
+
+        // No need to dispatch listDevices here — the CoreAudio property
+        // listener callback will fire and call listDevices for us.
+    }
+    else if ( !lock.paused && !forcedDeviceAvailable && lock.forcedName != nil )
+    {
+        NSLog( @"skipping %@ force: forced device '%@' is not connected", dirName, lock.forcedName );
+    }
+}
+
+
+- ( void ) manualPauseInput : ( NSMenuItem* ) item
+{
+    inputLock.paused = !inputLock.paused;
+    [ self listDevices ];
+}
+
+- ( void ) manualPauseOutput : ( NSMenuItem* ) item
+{
+    outputLock.paused = !outputLock.paused;
     [ self listDevices ];
 }
 
@@ -680,7 +681,8 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 {
     NSURL *url;
     if (@available(macOS 13.0, *)) {
-        url = [NSURL URLWithString:@"x-apple.systempreferences:com.apple.Sound-Settings.extension?Input"];
+        // General Sound pane (app now manages both input and output).
+        url = [NSURL URLWithString:@"x-apple.systempreferences:com.apple.Sound-Settings.extension"];
     } else {
         url = [NSURL fileURLWithPath:@"/System/Library/PreferencePanes/Sound.prefPane"];
     }
@@ -824,6 +826,7 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 {
     NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
     [notificationsItem setState: [prefs boolForKey:kPrefNotificationsEnabled] ? NSControlStateValueOn : NSControlStateValueOff];
+    [outputNotificationsItem setState: [prefs boolForKey:kPrefOutputNotificationsEnabled] ? NSControlStateValueOn : NSControlStateValueOff];
 }
 
 - (void)toggleNotifications
@@ -837,10 +840,22 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     }
 }
 
+- (void)toggleOutputNotifications
+{
+    NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
+    BOOL enabled = ![prefs boolForKey:kPrefOutputNotificationsEnabled];
+    [prefs setBool:enabled forKey:kPrefOutputNotificationsEnabled];
+    [self updateToggleStates];
+    if (enabled) {
+        [self requestNotificationAuthorizationIfNeeded];
+    }
+}
+
 - (void)requestNotificationAuthorizationIfNeeded
 {
     NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
-    if (![prefs boolForKey:kPrefNotificationsEnabled]) {
+    if (![prefs boolForKey:kPrefNotificationsEnabled] &&
+        ![prefs boolForKey:kPrefOutputNotificationsEnabled]) {
         return;
     }
 
@@ -854,29 +869,37 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     }];
 }
 
-- (void)handleForceAppliedForDevice:(AudioDeviceID)deviceID
-                               name:(NSString *)deviceName
-                      offendingName:(NSString *)offendingName
+- (void)handleForceAppliedForLock:(AudioLock *)lock
+                             name:(NSString *)deviceName
+                    offendingName:(NSString *)offendingName
 {
+    BOOL isInput = (lock.direction == AudioLockDirectionInput);
+    NSString *dirWord = isInput ? @"input" : @"output";
+
+    // Per-direction minimum-gap throttle.
     NSDate *now = [NSDate date];
-    if (lastNotificationTime != nil &&
-        [now timeIntervalSinceDate:lastNotificationTime] < kMinNotificationGap) {
+    NSDate *last = isInput ? lastInputNotificationTime : lastOutputNotificationTime;
+    if (last != nil && [now timeIntervalSinceDate:last] < kMinNotificationGap) {
         return;
     }
-
-    lastNotificationTime = now;
+    if (isInput) {
+        lastInputNotificationTime = now;
+    } else {
+        lastOutputNotificationTime = now;
+    }
 
     NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
+    NSString *enabledKey = isInput ? kPrefNotificationsEnabled : kPrefOutputNotificationsEnabled;
 
-    if ([prefs boolForKey:kPrefNotificationsEnabled] && notificationAuthGranted && !screenLocked) {
+    if ([prefs boolForKey:enabledKey] && notificationAuthGranted && !screenLocked) {
         UNMutableNotificationContent *content = [[UNMutableNotificationContent alloc] init];
-        content.title = @"Forced input active";
+        content.title = isInput ? @"Forced input active" : @"Forced output active";
 
         NSString *forcedName = deviceName ?: @"selected device";
         if (offendingName != nil) {
-            content.body = [NSString stringWithFormat:@"%@ took input control. Forced input back to %@.", offendingName, forcedName];
+            content.body = [NSString stringWithFormat:@"%@ took %@ control. Forced %@ back to %@.", offendingName, dirWord, dirWord, forcedName];
         } else {
-            content.body = [NSString stringWithFormat:@"Another device took input control. Forced input back to %@.", forcedName];
+            content.body = [NSString stringWithFormat:@"Another device took %@ control. Forced %@ back to %@.", dirWord, dirWord, forcedName];
         }
 
         UNNotificationRequest *request = [UNNotificationRequest
