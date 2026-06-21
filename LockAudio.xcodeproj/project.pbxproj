@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		3333F8A7219874D300816A9F /* AppDelegate.m in Sources */ = {isa = PBXBuildFile; fileRef = 3333F8A6219874D300816A9F /* AppDelegate.m */; };
+		5F15B4F1E0644EBABCC959C3 /* AudioLock.m in Sources */ = {isa = PBXBuildFile; fileRef = 52BCABA87292405CA2EDE4CC /* AudioLock.m */; };
 		3333F8A9219874D600816A9F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 3333F8A8219874D600816A9F /* Assets.xcassets */; };
 		3333F8AC219874D600816A9F /* MainMenu.xib in Resources */ = {isa = PBXBuildFile; fileRef = 3333F8AA219874D600816A9F /* MainMenu.xib */; };
 		3333F8AF219874D600816A9F /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = 3333F8AE219874D600816A9F /* main.m */; };
@@ -20,9 +21,11 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		3333F8A2219874D300816A9F /* Mac Audio Input Locker.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Mac Audio Input Locker.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		3333F8A2219874D300816A9F /* LockAudio.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LockAudio.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		3333F8A5219874D300816A9F /* AppDelegate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AppDelegate.h; sourceTree = "<group>"; };
 		3333F8A6219874D300816A9F /* AppDelegate.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = AppDelegate.m; sourceTree = "<group>"; };
+		52BCABA87292405CA2EDE4CC /* AudioLock.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = AudioLock.m; sourceTree = "<group>"; };
+		C23DF0C101AF4273A91B5CC8 /* AudioLock.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AudioLock.h; sourceTree = "<group>"; };
 		3333F8A8219874D600816A9F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		3333F8AB219874D600816A9F /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.xib; name = Base; path = Base.lproj/MainMenu.xib; sourceTree = "<group>"; };
 		3333F8AD219874D600816A9F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -53,7 +56,7 @@
 		3333F899219874D300816A9F = {
 			isa = PBXGroup;
 			children = (
-				3333F8A4219874D300816A9F /* Mac Audio Input Locker */,
+				3333F8A4219874D300816A9F /* LockAudio */,
 				3333F8A3219874D300816A9F /* Products */,
 				3333F8BA2198771700816A9F /* Frameworks */,
 			);
@@ -62,18 +65,20 @@
 		3333F8A3219874D300816A9F /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				3333F8A2219874D300816A9F /* Mac Audio Input Locker.app */,
+				3333F8A2219874D300816A9F /* LockAudio.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
 		};
-		3333F8A4219874D300816A9F /* Mac Audio Input Locker */ = {
+		3333F8A4219874D300816A9F /* LockAudio */ = {
 			isa = PBXGroup;
 			children = (
 				335B966F21988E6700F6D77B /* airpods-icon.png */,
 				335B966E21988E6700F6D77B /* airpods-icon@2x.png */,
 				3333F8A5219874D300816A9F /* AppDelegate.h */,
 				3333F8A6219874D300816A9F /* AppDelegate.m */,
+				C23DF0C101AF4273A91B5CC8 /* AudioLock.h */,
+				52BCABA87292405CA2EDE4CC /* AudioLock.m */,
 				3333F8A8219874D600816A9F /* Assets.xcassets */,
 				3333F8AA219874D600816A9F /* MainMenu.xib */,
 				3333F8AD219874D600816A9F /* Info.plist */,
@@ -81,7 +86,7 @@
 				335B967A2199C25A00F6D77B /* LICENSE */,
 				335B967B2199C25A00F6D77B /* README.md */,
 			);
-			path = "Mac Audio Input Locker";
+			path = LockAudio;
 			sourceTree = "<group>";
 		};
 		3333F8BA2198771700816A9F /* Frameworks */ = {
@@ -107,9 +112,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		3333F8A1219874D300816A9F /* Mac Audio Input Locker */ = {
+		3333F8A1219874D300816A9F /* LockAudio */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 3333F8B3219874D600816A9F /* Build configuration list for PBXNativeTarget "Mac Audio Input Locker" */;
+			buildConfigurationList = 3333F8B3219874D600816A9F /* Build configuration list for PBXNativeTarget "LockAudio" */;
 			buildPhases = (
 				3333F89E219874D300816A9F /* Sources */,
 				3333F89F219874D300816A9F /* Frameworks */,
@@ -119,9 +124,9 @@
 			);
 			dependencies = (
 			);
-			name = "Mac Audio Input Locker";
-			productName = "Mac Audio Input Locker";
-			productReference = 3333F8A2219874D300816A9F /* Mac Audio Input Locker.app */;
+			name = LockAudio;
+			productName = LockAudio;
+			productReference = 3333F8A2219874D300816A9F /* LockAudio.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -144,7 +149,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 3333F89D219874D300816A9F /* Build configuration list for PBXProject "Mac Audio Input Locker" */;
+			buildConfigurationList = 3333F89D219874D300816A9F /* Build configuration list for PBXProject "LockAudio" */;
 			compatibilityVersion = "Xcode 9.3";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -160,7 +165,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				3333F8A1219874D300816A9F /* Mac Audio Input Locker */,
+				3333F8A1219874D300816A9F /* LockAudio */,
 			);
 		};
 /* End PBXProject section */
@@ -189,6 +194,7 @@
 				335B96782199C07000F6D77B /* GBLaunchAtLogin.m in Sources */,
 				3333F8AF219874D600816A9F /* main.m in Sources */,
 				3333F8A7219874D300816A9F /* AppDelegate.m in Sources */,
+				5F15B4F1E0644EBABCC959C3 /* AudioLock.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -336,16 +342,16 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEAD_CODE_STRIPPING = YES;
-				INFOPLIST_FILE = "Mac Audio Input Locker/Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "Mac Audio Input Locker";
+				INFOPLIST_FILE = "LockAudio/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = LockAudio;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.6;
-				MARKETING_VERSION = 1.0.3;
-				PRODUCT_BUNDLE_IDENTIFIER = com.audio.locker;
+				MARKETING_VERSION = 2.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.lockaudio.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 			};
 			name = Debug;
@@ -359,17 +365,17 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
-				INFOPLIST_FILE = "Mac Audio Input Locker/Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "Mac Audio Input Locker";
+				INFOPLIST_FILE = "LockAudio/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = LockAudio;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.6;
-				MARKETING_VERSION = 1.0.3;
+				MARKETING_VERSION = 2.0.0;
 				OTHER_CODE_SIGN_FLAGS = "--timestamp --deep";
-				PRODUCT_BUNDLE_IDENTIFIER = com.audio.locker;
+				PRODUCT_BUNDLE_IDENTIFIER = com.lockaudio.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 			};
 			name = Release;
@@ -377,7 +383,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		3333F89D219874D300816A9F /* Build configuration list for PBXProject "Mac Audio Input Locker" */ = {
+		3333F89D219874D300816A9F /* Build configuration list for PBXProject "LockAudio" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				3333F8B1219874D600816A9F /* Debug */,
@@ -386,7 +392,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		3333F8B3219874D600816A9F /* Build configuration list for PBXNativeTarget "Mac Audio Input Locker" */ = {
+		3333F8B3219874D600816A9F /* Build configuration list for PBXNativeTarget "LockAudio" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				3333F8B4219874D600816A9F /* Debug */,

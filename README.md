@@ -1,21 +1,27 @@
-# Mac Audio Input Locker
+# LockAudio
 
-This is a fork of the very useful AirPods Sound Quality Fixer And Battery Life Enhancer For MacOS by [milgra](https://github.com/milgra/) that they no longer maintain. I decided to change the name of the app because A) it was too long and B) it didn't make it clear what the best feature of the app was.
+A lightweight macOS menu bar app that locks your audio input and output to the devices you choose — so macOS (and Bluetooth devices like AirPods) can't switch them out from under you.
 
-I will try to maintain this fork as long as I use the app or until Apple adds their own feature to accomplish the same thing.
+When AirPods connect, macOS often routes the microphone to them too, which drops your audio quality to a low-bandwidth call mode and drains AirPods battery faster. LockAudio keeps your input on the device you actually want (e.g. the built-in mic), so output stays in high-quality mode. It can do the same for output.
 
-## Original Features
+## Features
 
-- Fixes sound quality drops when using AirPods with Macs
-- Uses Mac's default audio input and locks it in so that Bluetooth devices don't auto-switch it.
-- Increases battery life on Bluetooth devices because this stops them from broadcasting at all times.
+- **Input locking** — pin the system audio input to a device of your choice. If something switches it away, LockAudio forces it right back.
+- **Output locking** — optionally pin the system audio output the same way (off by default; turn on "Show Output Options" to enable).
+- **Independent locks** — input and output are controlled separately, so you can keep your mic on the built-in input while locking output wherever you like.
+- **Survives reconnects** — your choice is remembered by device name and restored automatically when a device disconnects and comes back.
+- **Optional notifications** — get notified when a lock forces a device back, per direction.
+- **Pause anytime** — temporarily disable either lock without losing your settings.
+- **Stays out of the way** — menu bar only (no Dock icon), launches at login if you want, and updates itself automatically.
 
-## My Updates
+Your settings — locked devices, pause state, and which options are shown — persist across quitting the app and rebooting.
 
-- Switched to semantic versioning
-- Signed release so the app can be installed without headaches
-- Added a build script to release .dmg files instead of .zip
-- Added full Mac Sequoia 15.x compatibility 
-- Added automatic updates
-- Squashed some bugs
-- Fixed all deprecation notices
+## Installation
+
+Download the latest DMG from the [releases page](https://github.com/jstilwell/LockAudio/releases), open it, and drag **LockAudio** to your Applications folder. The app is signed and notarized, and updates itself from then on.
+
+Requires macOS 10.14 or later.
+
+---
+
+LockAudio began as a fork of the AirPods Sound Quality Fixer And Battery Life Enhancer for macOS by [milgra](https://github.com/milgra/) — thanks to them for the original codebase.
