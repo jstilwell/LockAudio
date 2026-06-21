@@ -1,6 +1,8 @@
-# Mac Audio Input Locker
+# LockAudio
 
 This is a fork of the very useful AirPods Sound Quality Fixer And Battery Life Enhancer For MacOS by [milgra](https://github.com/milgra/) that they no longer maintain. I decided to change the name of the app because A) it was too long and B) it didn't make it clear what the best feature of the app was.
+
+> Formerly **Mac Audio Input Locker**. Renamed to **LockAudio** in 2.0.0.
 
 I will try to maintain this fork as long as I use the app or until Apple adds their own feature to accomplish the same thing.
 
