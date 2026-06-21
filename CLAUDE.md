@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Mac Audio Input Locker** is a macOS menu bar application that improves AirPods sound quality and battery life by forcing the Mac to use the built-in microphone instead of AirPods' microphone. This prevents macOS from mixing down the audio output quality.
+**LockAudio** (formerly Mac Audio Input Locker, renamed in 2.0.0) is a macOS menu bar application that improves AirPods sound quality and battery life by forcing the Mac to use the built-in microphone instead of AirPods' microphone. This prevents macOS from mixing down the audio output quality.
 
 ## Technology Stack
 
@@ -22,10 +22,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Development build
 ```bash
 # Open in Xcode
-open "Mac Audio Input Locker.xcodeproj"
+open "LockAudio.xcodeproj"
 
 # Build from command line
-xcodebuild -project "Mac Audio Input Locker.xcodeproj" -scheme "Mac Audio Input Locker" -configuration Release build
+xcodebuild -project "LockAudio.xcodeproj" -scheme "LockAudio" -configuration Release build
 ```
 
 ### Release build
@@ -78,7 +78,7 @@ xcodebuild -project "Mac Audio Input Locker.xcodeproj" -scheme "Mac Audio Input 
 - Integrated via Swift Package Manager (SPM)
 - Public EdDSA key stored in Info.plist (`SUPublicEDKey`)
 - Private key stored securely in macOS Keychain
-- Update feed URL: `https://updates.macaudioinputlocker.com/appcast.xml` (legacy host `https://mac-audio-input-locker.jesse.id/appcast.xml` still serves the feed during transition)
+- Update feed URL: `https://updates.lockaudio.com/appcast.xml` (the pre-rename host `https://updates.macaudioinputlocker.com/appcast.xml` is kept alive to serve the one-time "we've moved to LockAudio" notice to old `com.audio.locker` installs)
 - Updates are signed with EdDSA signatures in appcast.xml
 - Build script automatically signs DMG files using Sparkle's `sign_update` tool
 
@@ -103,7 +103,7 @@ xcodebuild -project "Mac Audio Input Locker.xcodeproj" -scheme "Mac Audio Input 
 ## File Structure
 
 ```
-Mac Audio Input Locker/
+LockAudio/
 ├── AppDelegate.h/m          # Main application controller
 ├── main.m                   # Entry point
 ├── Info.plist               # App metadata, Sparkle config
@@ -131,7 +131,7 @@ release/                     # Build output (gitignored)
 - Uses modern `kAudioObjectPropertyElementMain` (not deprecated `kAudioObjectPropertyElementMaster`)
 - No unit tests present in project
 - Sandbox is disabled (com.apple.Sandbox = 0 in project.pbxproj)
-- Bundle identifier: com.audio.locker
+- Bundle identifier: com.lockaudio.app (was com.audio.locker before 2.0.0; the bundle-id change means upgrading users get a one-time settings migration in AppDelegate.m — see `migrateSettingsFromLegacyBundleIfNeeded`)
 
 ## Release Process
 
@@ -152,11 +152,11 @@ release/                     # Build output (gitignored)
 9. Uploads DMG to GitHub releases
 
 ### Cloudflare R2 Setup (one-time)
-The appcast.xml update feed is hosted on Cloudflare R2 at `updates.macaudioinputlocker.com`. The legacy host `mac-audio-input-locker.jesse.id` is kept alive during a transition period for users on pre-1.1.0 versions whose apps still poll the old URL.
+The appcast.xml update feed is hosted on Cloudflare R2 at `updates.lockaudio.com`. The pre-rename host `updates.macaudioinputlocker.com` (bucket `mac-audio-input-locker`) is kept alive to serve a one-time "we've moved to LockAudio" notice to old `com.audio.locker` installs, since the bundle-id change means they cannot auto-update across to the new app.
 
-- **Bucket**: `mac-audio-input-locker` (with public access via custom domain)
-- **Custom domain**: `updates.macaudioinputlocker.com` (CNAME pointing to R2 bucket)
-- **Feed URL**: `https://updates.macaudioinputlocker.com/appcast.xml`
+- **Bucket**: `lockaudio` (with public access via custom domain)
+- **Custom domain**: `updates.lockaudio.com` (CNAME pointing to R2 bucket, min TLS 1.0)
+- **Feed URL**: `https://updates.lockaudio.com/appcast.xml`
 
 To set up R2 credentials for the build script:
 1. Copy `.env.example` to `.env` and fill in your Cloudflare Account ID
@@ -174,7 +174,7 @@ The build script automatically reads configuration from `.env` (gitignored) and 
 ### Sparkle Key Management
 - Public key is in Info.plist (`SUPublicEDKey`)
 - Private key is stored in macOS Keychain (named "Private key for signing Sparkle updates")
-- Keys generated once with: `~/Library/Developer/Xcode/DerivedData/Mac_Audio_Input_Locker-*/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_keys`
+- Keys generated once with: `~/Library/Developer/Xcode/DerivedData/LockAudio-*/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_keys`
 - Never commit private key or export it unless migrating to new machine
 
 ## Code Patterns
