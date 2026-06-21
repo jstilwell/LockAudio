@@ -25,11 +25,11 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Configuration
-PROJECT_NAME="Mac Audio Input Locker"
-PROJECT_FILE="Mac Audio Input Locker.xcodeproj"
-SCHEME="Mac Audio Input Locker"
-APP_NAME="Mac Audio Input Locker.app"
-PLIST_PATH="Mac Audio Input Locker/Info.plist"
+PROJECT_NAME="LockAudio"
+PROJECT_FILE="LockAudio.xcodeproj"
+SCHEME="LockAudio"
+APP_NAME="LockAudio.app"
+PLIST_PATH="LockAudio/Info.plist"
 
 # Load .env file
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -164,10 +164,10 @@ fi
 
 # Check if version tag already exists on GitHub
 if command -v gh &> /dev/null && gh auth status &> /dev/null 2>&1; then
-    if gh release view "v${VERSION}" --repo jstilwell/MacAudioInputLocker &> /dev/null; then
+    if gh release view "v${VERSION}" --repo jstilwell/LockAudio &> /dev/null; then
         echo -e "${RED}Error: Version ${VERSION} already exists on GitHub!${NC}"
         echo "Please update CFBundleShortVersionString in Info.plist to a new version."
-        echo "Current releases: https://github.com/jstilwell/MacAudioInputLocker/releases"
+        echo "Current releases: https://github.com/jstilwell/LockAudio/releases"
         exit 1
     fi
 fi
@@ -198,7 +198,7 @@ if [ ! -d "$RELEASE_DIR/$APP_NAME" ]; then
 fi
 
 # Create DMG
-DMG_NAME="MacAudioInputLocker-${VERSION}.dmg"
+DMG_NAME="LockAudio-${VERSION}.dmg"
 DMG_PATH="$RELEASE_DIR/$DMG_NAME"
 echo -e "${YELLOW}Creating DMG with Applications folder symlink: ${DMG_NAME}${NC}"
 
@@ -355,14 +355,14 @@ cat > appcast.xml << EOF
 <?xml version="1.0" encoding="utf-8"?>
 <rss version="2.0" xmlns:sparkle="http://www.sparkleproject.org/xml/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
   <channel>
-    <title>Mac Audio Input Locker</title>
+    <title>LockAudio</title>
     <link>${APPCAST_PUBLIC_URL}</link>
-    <description>Most recent updates to Mac Audio Input Locker</description>
+    <description>Most recent updates to LockAudio</description>
     <language>en</language>
 
     <item>
       <title>Version ${VERSION}</title>
-      <link>https://github.com/jstilwell/MacAudioInputLocker/releases</link>
+      <link>https://github.com/jstilwell/LockAudio/releases</link>
       <sparkle:version>${VERSION}</sparkle:version>
       <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
       <description><![CDATA[
@@ -372,7 +372,7 @@ ${APPCAST_FEATURES}        </ul>
       ]]></description>
       <pubDate>${PUB_DATE}</pubDate>
       <enclosure
-        url="https://github.com/jstilwell/MacAudioInputLocker/releases/download/v${VERSION}/${DMG_NAME}"
+        url="https://github.com/jstilwell/LockAudio/releases/download/v${VERSION}/${DMG_NAME}"
         sparkle:version="${VERSION}"
         sparkle:shortVersionString="${VERSION}"
         length="${FILE_SIZE}"
@@ -414,10 +414,10 @@ if [ "$UPLOAD_TO_GITHUB" = true ]; then
         "${DMG_PATH}" \
         --title "Version ${VERSION}" \
         --notes "$GITHUB_NOTES" \
-        --repo jstilwell/MacAudioInputLocker
+        --repo jstilwell/LockAudio
 
     echo -e "${GREEN}Release created successfully!${NC}"
-    echo "View at: https://github.com/jstilwell/MacAudioInputLocker/releases/tag/v${VERSION}"
+    echo "View at: https://github.com/jstilwell/LockAudio/releases/tag/v${VERSION}"
 else
     echo -e "${YELLOW}Next steps:${NC}"
     echo "  Create GitHub release and upload DMG:"
