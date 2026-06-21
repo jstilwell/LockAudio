@@ -14,12 +14,14 @@
 	<string>6.0</string>
 	<key>CFBundleName</key>
 	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundleDisplayName</key>
+	<string>LockAudio</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.1.3</string>
+	<string>2.0.0</string>
 	<key>CFBundleVersion</key>
-	<string>1.1.3</string>
+	<string>2.0.0</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.utilities</string>
 	<key>LSMinimumSystemVersion</key>
@@ -33,7 +35,7 @@
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>SUFeedURL</key>
-	<string>https://updates.macaudioinputlocker.com/appcast.xml</string>
+	<string>https://updates.lockaudio.com/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>zZPI759UgnxBcP6jpkQaM2aTof3sLMsp7wTEKoYvnxQ=</string>
 </dict>

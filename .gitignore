@@ -5,8 +5,10 @@
 # App
 .DS_Store
 .env
+.wrangler/
 SPARKLE_SETUP.md
 appcast.xml
+old-feed-appcast.xml
 release/
 
 ## Build generated
