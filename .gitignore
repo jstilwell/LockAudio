@@ -5,6 +5,7 @@
 # App
 .DS_Store
 .env
+.wrangler/
 SPARKLE_SETUP.md
 appcast.xml
 release/
