@@ -8,6 +8,7 @@
 .wrangler/
 SPARKLE_SETUP.md
 appcast.xml
+old-feed-appcast.xml
 release/
 
 ## Build generated
