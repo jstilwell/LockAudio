@@ -26,20 +26,30 @@ typedef NS_ENUM(NSUInteger, AudioLockDirection) {
 /// has not been resolved to a concrete device yet (matches the legacy sentinel).
 @property (nonatomic) AudioDeviceID forcedID;
 
-/// Human-readable name of the forced device, used to recover the ID across
-/// disconnect/reconnect (the AudioDeviceID can change).
+/// Human-readable name of the forced device. Used as a *fallback* to recover
+/// the ID across disconnect/reconnect for installs saved before `forcedUID`
+/// existed. Prefer `forcedUID` — the display name can change (e.g. AirPods
+/// codec-mode changes, localization), which is why output recovery was flaky.
 @property (nonatomic, copy, nullable) NSString *forcedName;
+
+/// Stable, persistent CoreAudio device UID (kAudioDevicePropertyDeviceUID) of
+/// the forced device. Unlike the display name this is intended for persistence
+/// and does not change across disconnect/reconnect, so it is the primary key
+/// used to recover the AudioDeviceID (which *does* change).
+@property (nonatomic, copy, nullable) NSString *forcedUID;
 
 /// When YES, forcing is temporarily disabled for this direction. This is the
 /// runtime state; the persisted pause *preference* lives in NSUserDefaults
 /// (AppDelegate owns it, since it interacts with the show/hide toggles).
 @property (nonatomic) BOOL paused;
 
-/// Designated initializer. `defaultsKey` / `defaultsNameKey` are the
-/// NSUserDefaults keys used to persist the device id and name.
+/// Designated initializer. `defaultsKey` / `defaultsNameKey` / `defaultsUIDKey`
+/// are the NSUserDefaults keys used to persist the device id, display name, and
+/// stable UID respectively.
 - (instancetype)initWithDirection:(AudioLockDirection)direction
                       defaultsKey:(NSString *)defaultsKey
-                  defaultsNameKey:(NSString *)defaultsNameKey NS_DESIGNATED_INITIALIZER;
+                  defaultsNameKey:(NSString *)defaultsNameKey
+                   defaultsUIDKey:(NSString *)defaultsUIDKey NS_DESIGNATED_INITIALIZER;
 
 - (instancetype)init NS_UNAVAILABLE;
 
@@ -60,6 +70,15 @@ typedef NS_ENUM(NSUInteger, AudioLockDirection) {
 
 /// YES if `deviceID` has at least one stream in this lock's direction.
 - (BOOL)deviceParticipates:(AudioDeviceID)deviceID;
+
+/// Reads the stable persistent UID (kAudioDevicePropertyDeviceUID) for a device,
+/// or nil if it can't be read. This UID survives disconnect/reconnect even
+/// though the AudioDeviceID does not.
+- (nullable NSString *)uidForDevice:(AudioDeviceID)deviceID;
+
+/// Reads a device's display name (kAudioDevicePropertyDeviceName), or nil if it
+/// can't be read.
+- (nullable NSString *)nameForDevice:(AudioDeviceID)deviceID;
 
 /// Reads the system's current default device for this direction.
 - (AudioDeviceID)currentDefaultDevice;
