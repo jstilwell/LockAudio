@@ -9,7 +9,7 @@ When AirPods connect, macOS often routes the microphone to them too, which drops
 - **Input locking** — pin the system audio input to a device of your choice. If something switches it away, LockAudio forces it right back.
 - **Output locking** — optionally pin the system audio output the same way (off by default; turn on "Show Output Options" to enable).
 - **Independent locks** — input and output are controlled separately, so you can keep your mic on the built-in input while locking output wherever you like.
-- **Survives reconnects** — your choice is remembered by device name and restored automatically when a device disconnects and comes back.
+- **Survives reconnects** — your choice is remembered and restored automatically when a device disconnects and comes back, even if macOS reassigns it a new internal ID.
 - **Optional notifications** — get notified when a lock forces a device back, per direction.
 - **Pause anytime** — temporarily disable either lock without losing your settings.
 - **Stays out of the way** — menu bar only (no Dock icon), launches at login if you want, and updates itself automatically.
