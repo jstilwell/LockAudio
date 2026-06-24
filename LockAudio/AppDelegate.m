@@ -23,8 +23,10 @@ static NSString* const kPrefOutputNotificationsEnabled = @"OutputNotificationsEn
 // keys keep their original names ("Device"/"DeviceName") for backward compat.
 static NSString* const kPrefInputDevice = @"Device";
 static NSString* const kPrefInputDeviceName = @"DeviceName";
+static NSString* const kPrefInputDeviceUID = @"DeviceUID";
 static NSString* const kPrefOutputDevice = @"OutputDevice";
 static NSString* const kPrefOutputDeviceName = @"OutputDeviceName";
+static NSString* const kPrefOutputDeviceUID = @"OutputDeviceUID";
 
 // Per-direction "show these options in the menu" toggles. When a direction is
 // hidden its whole menu section is removed and its lock is paused; showing it
@@ -210,12 +212,14 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 
     inputLock = [[AudioLock alloc] initWithDirection:AudioLockDirectionInput
                                          defaultsKey:kPrefInputDevice
-                                     defaultsNameKey:kPrefInputDeviceName];
+                                     defaultsNameKey:kPrefInputDeviceName
+                                      defaultsUIDKey:kPrefInputDeviceUID];
     [inputLock loadFromDefaults];
 
     outputLock = [[AudioLock alloc] initWithDirection:AudioLockDirectionOutput
                                           defaultsKey:kPrefOutputDevice
-                                      defaultsNameKey:kPrefOutputDeviceName];
+                                      defaultsNameKey:kPrefOutputDeviceName
+                                       defaultsUIDKey:kPrefOutputDeviceUID];
     [outputLock loadFromDefaults];
 
     // Runtime pause state = persisted pause preference OR section hidden. A
@@ -312,6 +316,9 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 
     lock.forcedID = newId;
     lock.forcedName = item.title;
+    // Capture the stable UID so we can recover this exact device across
+    // disconnect/reconnect even if its display name changes.
+    lock.forcedUID = [lock uidForDevice:newId];
 
     // User-initiated switch: suppress the next forced notification for this
     // direction (see suppressNext*Notification).
@@ -475,6 +482,113 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 }
 
 
+// Resolves `lock`'s forced device to a currently-connected AudioDeviceID that
+// participates in this lock's direction, and returns whether it is available.
+// The forced AudioDeviceID can change across disconnect/reconnect, so we
+// re-derive it each rebuild:
+//   1. If the saved `forcedID` is still present AND still identifies the same
+//      device (its UID matches `forcedUID`), keep it. CoreAudio can recycle an
+//      AudioDeviceID for a different physical device, so when we have a UID we
+//      confirm it rather than trusting the bare id.
+//   2. Otherwise match by stable UID (kAudioDevicePropertyDeviceUID) — this is
+//      the reliable key and fixes output recovery, since a device's display
+//      name can change (AirPods codec mode) but its UID does not.
+//   3. Otherwise fall back to the display name (covers installs saved before
+//      UIDs were persisted) and backfill the UID so future recovery is robust.
+// Every match is filtered by `deviceParticipates:` so we never force a device
+// that has no stream in this direction. On a successful re-match the new id is
+// persisted. When the device isn't connected we keep the saved id/name/UID
+// untouched so it can recover later.
+- ( BOOL ) resolveForcedDeviceForLock : ( AudioLock* ) lock
+                            inDevices : ( AudioDeviceID* ) devices
+                                count : ( int ) numberOfDevices
+{
+    NSString *dirName = ( lock.direction == AudioLockDirectionInput ) ? @"input" : @"output";
+
+    // Nothing forced yet (and no saved identity to recover from).
+    if ( lock.forcedID == UINT32_MAX && lock.forcedUID == nil && lock.forcedName == nil )
+    {
+        return NO;
+    }
+
+    // 1. Saved id still present, participating, and (when we have a UID) still
+    //    the same physical device? Keep it.
+    if ( lock.forcedID < UINT32_MAX )
+    {
+        for ( int index = 0; index < numberOfDevices; index++ )
+        {
+            if ( devices[index] != lock.forcedID )
+            {
+                continue;
+            }
+            if ( ![lock deviceParticipates:devices[index]] )
+            {
+                break; // id present but not in our direction — try UID/name.
+            }
+            if ( lock.forcedUID != nil )
+            {
+                // We have a stable UID, so the bare id is only trustworthy if it
+                // still identifies the same device. Require a positive UID match:
+                // a mismatch (id recycled) OR an unreadable UID both fall through
+                // to the authoritative UID search rather than risk the wrong one.
+                NSString *uid = [lock uidForDevice:devices[index]];
+                if ( ![lock.forcedUID isEqualToString:uid] )
+                {
+                    NSLog( @"forced %@ id %u no longer confirms UID %@; re-resolving by UID",
+                           dirName, (unsigned int)lock.forcedID, lock.forcedUID );
+                    break; // fall through to UID search.
+                }
+            }
+            NSLog( @"forced %@ found in device list", dirName );
+            return YES;
+        }
+    }
+
+    // 2. Match by stable UID.
+    if ( lock.forcedUID != nil )
+    {
+        for ( int index = 0; index < numberOfDevices; index++ )
+        {
+            if ( ![lock deviceParticipates:devices[index]] )
+            {
+                continue;
+            }
+            NSString *uid = [lock uidForDevice:devices[index]];
+            if ( uid != nil && [uid isEqualToString:lock.forcedUID] )
+            {
+                NSLog( @"forced %@ recovered by UID: %@ -> %u", dirName, uid, (unsigned int)devices[index] );
+                lock.forcedID = devices[index];
+                [lock saveToDefaults];
+                return YES;
+            }
+        }
+    }
+
+    // 3. Fall back to display name; backfill the UID for next time.
+    if ( lock.forcedName != nil )
+    {
+        for ( int index = 0; index < numberOfDevices; index++ )
+        {
+            if ( ![lock deviceParticipates:devices[index]] )
+            {
+                continue;
+            }
+            NSString *nameStr = [lock nameForDevice:devices[index]];
+            if ( nameStr != nil && [nameStr isEqualToString:lock.forcedName] )
+            {
+                NSLog( @"forced %@ recovered by name: %@ -> %u", dirName, nameStr, (unsigned int)devices[index] );
+                lock.forcedID = devices[index];
+                lock.forcedUID = [lock uidForDevice:devices[index]];
+                [lock saveToDefaults];
+                return YES;
+            }
+        }
+    }
+
+    NSLog( @"forced %@ device '%@' not connected; keeping saved selection for recovery", dirName, lock.forcedName );
+    return NO;
+}
+
 // Resolves/recovers `lock`'s forced device, appends one menu item per
 // participating device (checkmark on the forced one), and re-applies the force
 // if another device has stolen the default. Ported from the original
@@ -512,115 +626,19 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 
     BOOL isInput = ( lock.direction == AudioLockDirectionInput );
     NSString *dirName = isInput ? @"input" : @"output";
-    BOOL forcedDeviceAvailable = NO;
 
     // Maps deviceID -> name for the participating devices, used to name the
     // "offending" device that stole the default.
     NSMutableDictionary<NSNumber *, NSString *> *idToName = [NSMutableDictionary dictionary];
 
-    if ( lock.forcedID < UINT32_MAX )
-    {
-
-        char found = 0;
-
-        for( int index = 0 ;
-                 index < numberOfDevices ;
-                 index++ )
-        {
-
-            if ( dev_array[ index] == lock.forcedID ) found = 1;
-
-        }
-
-        if ( found == 0 )
-        {
-            NSLog( @"forced %@ not found by ID, searching by name: %@", dirName, lock.forcedName );
-
-            // Device ID changed (e.g. reconnected) — try to find by name
-            if ( lock.forcedName != nil )
-            {
-                for ( int index = 0; index < numberOfDevices; index++ )
-                {
-                    char deviceName[256];
-                    UInt32 nameSize = 256;
-
-                    AudioObjectPropertyAddress nameAddr = {
-                        kAudioDevicePropertyDeviceName,
-                        kAudioObjectPropertyScopeGlobal,
-                        kAudioObjectPropertyElementMain
-                    };
-
-                    AudioObjectGetPropertyData(
-                        dev_array[index],
-                        &nameAddr,
-                        0,
-                        NULL,
-                        &nameSize,
-                        deviceName);
-
-                    NSString* nameStr = [ NSString stringWithUTF8String : deviceName ];
-
-                    if ( [ nameStr isEqualToString : lock.forcedName ] )
-                    {
-                        NSLog( @"forced %@ recovered by name: %@ -> %u", dirName, nameStr, (unsigned int)dev_array[index] );
-                        lock.forcedID = dev_array[index];
-                        [lock saveToDefaults];
-
-                        found = 1;
-                        forcedDeviceAvailable = YES;
-                        break;
-                    }
-                }
-            }
-
-            if ( found == 0 )
-            {
-                NSLog( @"forced %@ not found in device list", dirName );
-                // Don't reset — keep the name so we can recover later
-            }
-        }
-        else
-        {
-            NSLog( @"forced %@ found in device list", dirName );
-            forcedDeviceAvailable = YES;
-        }
-
-    }
-    else if ( lock.forcedName != nil )
-    {
-        // forcedID is UINT32_MAX but we have a saved name — device was
-        // previously disconnected, try to find it again
-        for ( int index = 0; index < numberOfDevices; index++ )
-        {
-            char deviceName[256];
-            UInt32 nameSize = 256;
-
-            AudioObjectPropertyAddress nameAddr = {
-                kAudioDevicePropertyDeviceName,
-                kAudioObjectPropertyScopeGlobal,
-                kAudioObjectPropertyElementMain
-            };
-
-            AudioObjectGetPropertyData(
-                dev_array[index],
-                &nameAddr,
-                0,
-                NULL,
-                &nameSize,
-                deviceName);
-
-            NSString* nameStr = [ NSString stringWithUTF8String : deviceName ];
-
-            if ( [ nameStr isEqualToString : lock.forcedName ] )
-            {
-                NSLog( @"forced %@ restored from saved name: %@ -> %u", dirName, nameStr, (unsigned int)dev_array[index] );
-                lock.forcedID = dev_array[index];
-                [lock saveToDefaults];
-                forcedDeviceAvailable = YES;
-                break;
-            }
-        }
-    }
+    // Resolve the forced device to a currently-connected AudioDeviceID. Prefers
+    // the stable UID, falls back to the display name (and backfills the UID for
+    // installs saved before UIDs were persisted). This is what makes a forced
+    // device survive disconnect/reconnect even though its AudioDeviceID — and,
+    // for some devices like AirPods, its display name — can change.
+    BOOL forcedDeviceAvailable = [self resolveForcedDeviceForLock:lock
+                                                        inDevices:dev_array
+                                                            count:numberOfDevices];
 
 
     for( int index = 0 ;
@@ -636,37 +654,42 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
             continue;
         }
 
-        // get name
-        char deviceName[256];
-        propertySize = 256;
+        // Get the display name.
+        NSString* nameStr = [ lock nameForDevice : oneDeviceID ];
+        if ( nameStr == nil )
+        {
+            // Name unreadable. If this is the currently-forced device (e.g.
+            // recovered by UID through a transient name-read failure), show a
+            // *disabled* row under its saved name so the user still sees what's
+            // locked and the checkmark stays put — but it isn't selectable, so a
+            // placeholder can never be written back into forcedName. Any other
+            // unreadable device is simply omitted (it was never useful to list).
+            if ( oneDeviceID == lock.forcedID && lock.forcedName != nil )
+            {
+                NSMenuItem* forcedItem = [ targetMenu
+                    addItemWithTitle : lock.forcedName
+                    action : NULL
+                    keyEquivalent : @"" ];
+                [ forcedItem setEnabled : NO ];
+                [ forcedItem setState : NSControlStateValueOn ];
+                NSLog( @"%@ forced device name unreadable; showing saved name '%@' (%u)",
+                       dirName, lock.forcedName, (unsigned int)oneDeviceID );
+            }
+            continue;
+        }
 
-        AudioObjectPropertyAddress nameAddress = {
-            kAudioDevicePropertyDeviceName,
-            kAudioObjectPropertyScopeGlobal,
-            kAudioObjectPropertyElementMain
-        };
-
-        AudioObjectGetPropertyData(
-            oneDeviceID,
-            &nameAddress,
-            0,
-            NULL,
-            &propertySize,
-            deviceName);
-
-        NSLog( @"found %@ device : %s  %u\n" , dirName, deviceName , (unsigned int)oneDeviceID );
-
-        NSString* nameStr = [ NSString stringWithUTF8String : deviceName ];
+        NSLog( @"found %@ device : %@  %u\n" , dirName, nameStr , (unsigned int)oneDeviceID );
 
         // Default the INPUT lock to the built-in device when nothing is saved.
         // Output locking is opt-in, so it has no default device.
         if ( isInput && [ [ nameStr lowercaseString ] containsString : @"built" ]
              && lock.forcedID == UINT32_MAX && lock.forcedName == nil )
         {
-            NSLog( @"setting default forced %@ : %s  %u\n" , dirName, deviceName , (unsigned int)oneDeviceID );
+            NSLog( @"setting default forced %@ : %@  %u\n" , dirName, nameStr , (unsigned int)oneDeviceID );
 
             lock.forcedID = oneDeviceID;
             lock.forcedName = nameStr;
+            lock.forcedUID = [lock uidForDevice:oneDeviceID];
             forcedDeviceAvailable = YES;
             [lock saveToDefaults];
         }
@@ -680,7 +703,7 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
         if ( oneDeviceID == lock.forcedID )
         {
             [ item setState : NSControlStateValueOn ];
-            NSLog( @"%@ device selected : %s  %u\n" , dirName, deviceName , (unsigned int)oneDeviceID );
+            NSLog( @"%@ device selected : %@  %u\n" , dirName, nameStr , (unsigned int)oneDeviceID );
         }
 
         idToName[ @((unsigned int)oneDeviceID) ] = nameStr;
