@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## 2.0.1 - 06-24-2026
+
+### Fixed
+
+- Forced output is now reliably restored after the locked device disconnects and reconnects. Previously a forced output device (e.g. AirPods) could be forgotten on reconnect because recovery matched on the device's display name, which some devices change between connections. Recovery now keys on the device's stable system identifier, so the lock re-applies to the right device every time. Forced input is restored the same way.
+- A device whose name is momentarily unreadable while it reconnects no longer disappears from the menu — if it's the one you've locked, it stays listed and checked so you can always see what's forced.
+
 ## 2.0.0 - 06-21-2026
 
 ### Added
