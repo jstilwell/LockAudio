@@ -709,8 +709,6 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
         idToName[ @((unsigned int)oneDeviceID) ] = nameStr;
     }
 
-    free(dev_array);
-
     // Force the device if needed (the callback will trigger another listDevices)
     AudioDeviceID deviceID = [ lock currentDefaultDevice ];
     NSLog( @"default %@ device is %u" , dirName, deviceID );
@@ -748,8 +746,38 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     }
     else if ( !lock.paused && !forcedDeviceAvailable && lock.forcedName != nil )
     {
-        NSLog( @"skipping %@ force: forced device '%@' is not connected", dirName, lock.forcedName );
+        // The forced device is disconnected. Don't leave the default to macOS,
+        // which can land on an arbitrary device (e.g. a RØDE that's both an
+        // input and output) instead of the built-in. Actively fall back to the
+        // built-in device so output returns to the MacBook speakers (and input
+        // to the built-in mic). The saved selection is untouched, so the lock
+        // recovers the forced device the moment it reconnects.
+        AudioDeviceID builtInID = [ lock builtInDeviceInDevices : dev_array
+                                                          count : numberOfDevices ];
+
+        if ( builtInID != kAudioDeviceUnknown && deviceID != builtInID )
+        {
+            NSLog( @"forced %@ device '%@' not connected; falling back to built-in %u",
+                   dirName, lock.forcedName, (unsigned int)builtInID );
+
+            OSStatus forceStatus = [ lock applyForce : builtInID ];
+            if ( forceStatus != noErr )
+            {
+                NSLog( @"fallback %@ force failed: OSStatus %d", dirName, (int)forceStatus );
+            }
+            // No notification: a disconnect-driven fallback to built-in isn't the
+            // same event as another device stealing the lock, and notifying on
+            // every disconnect would be noisy. The property-listener callback
+            // will fire and rebuild the menu.
+        }
+        else
+        {
+            NSLog( @"forced %@ device '%@' not connected; no built-in fallback applied (built-in %u, current default %u)",
+                   dirName, lock.forcedName, (unsigned int)builtInID, (unsigned int)deviceID );
+        }
     }
+
+    free(dev_array);
 }
 
 

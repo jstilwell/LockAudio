@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 2.0.2 - 06-26-2026
+
+### Fixed
+
+- When a forced device disconnects, audio now falls back to the built-in device (MacBook speakers for output, built-in mic for input) instead of letting macOS jump to an arbitrary other device. Previously, disconnecting a forced output such as AirPods could send sound to whatever else was connected (for example a USB microphone that also acts as an output) rather than the laptop speakers. Your locked device is still remembered, so the lock re-applies the moment it reconnects.
+
 ## 2.0.1 - 06-24-2026
 
 ### Fixed
