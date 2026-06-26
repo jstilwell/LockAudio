@@ -83,6 +83,15 @@ typedef NS_ENUM(NSUInteger, AudioLockDirection) {
 /// Reads the system's current default device for this direction.
 - (AudioDeviceID)currentDefaultDevice;
 
+/// Finds the built-in device (built-in speakers for output, built-in mic for
+/// input) among `devices` that participates in this direction, identified by
+/// CoreAudio transport type (kAudioDeviceTransportTypeBuiltIn) rather than its
+/// localized name. Returns kAudioDeviceUnknown if there is no participating
+/// built-in device. Used as the fallback target when the forced device
+/// disconnects, so macOS doesn't pick an arbitrary other device.
+- (AudioDeviceID)builtInDeviceInDevices:(AudioDeviceID *)devices
+                                  count:(int)numberOfDevices;
+
 /// Sets the system's default device for this direction. Returns the OSStatus.
 - (OSStatus)applyForce:(AudioDeviceID)deviceID;
 

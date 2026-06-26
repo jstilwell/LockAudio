@@ -209,6 +209,46 @@
     return deviceID;
 }
 
+- (AudioDeviceID)builtInDeviceInDevices:(AudioDeviceID *)devices
+                                  count:(int)numberOfDevices
+{
+    AudioObjectPropertyAddress transportAddress = {
+        kAudioDevicePropertyTransportType,
+        kAudioObjectPropertyScopeGlobal,
+        kAudioObjectPropertyElementMain
+    };
+
+    for ( int index = 0; index < numberOfDevices; index++ )
+    {
+        AudioDeviceID deviceID = devices[index];
+
+        // Only consider devices that have a stream in this direction, so the
+        // output fallback lands on built-in *speakers* and the input fallback on
+        // the built-in *mic* (these are distinct CoreAudio devices).
+        if ( ![self deviceParticipates:deviceID] )
+        {
+            continue;
+        }
+
+        UInt32 transportType = 0;
+        UInt32 propertySize = sizeof(transportType);
+        OSStatus status = AudioObjectGetPropertyData(
+            deviceID,
+            &transportAddress,
+            0,
+            NULL,
+            &propertySize,
+            &transportType);
+
+        if ( status == noErr && transportType == kAudioDeviceTransportTypeBuiltIn )
+        {
+            return deviceID;
+        }
+    }
+
+    return kAudioDeviceUnknown;
+}
+
 - (OSStatus)applyForce:(AudioDeviceID)deviceID
 {
     AudioObjectPropertyAddress address = {
