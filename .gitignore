@@ -4,6 +4,7 @@
 
 # App
 .DS_Store
+CLAUDE.md
 .env
 .wrangler/
 SPARKLE_SETUP.md
