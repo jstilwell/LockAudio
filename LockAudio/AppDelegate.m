@@ -351,7 +351,8 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     rebuildingMenu = YES;
 
     NSDictionary *bundleInfo = [ [ NSBundle mainBundle] infoDictionary];
-    NSString *versionString = [ NSString stringWithFormat : @"Version %@",
+    NSString *versionString = [ NSString stringWithFormat :
+                               NSLocalizedString(@"Version %@", @"App version label"),
                                bundleInfo[ @"CFBundleShortVersionString" ] ];
 
     NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
@@ -373,11 +374,13 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     // Input section (label, device list, per-direction pause) — only when shown.
     if ( showInput )
     {
-        [ menu addItemWithTitle : @"Forced input:" action : nil keyEquivalent : @"" ];
+        [ menu addItemWithTitle : NSLocalizedString(@"Forced input:", @"Input device section heading")
+                            action : nil
+                     keyEquivalent : @"" ];
         [ self appendDevicesForLock : inputLock toMenu : menu ];
 
         pauseInput = [ menu
-                addItemWithTitle : @"Pause Input Lock"
+                addItemWithTitle : NSLocalizedString(@"Pause Input Lock", @"Pause input locking menu item")
                 action : @selector(manualPauseInput:)
                 keyEquivalent : @"" ];
         if ( inputLock.paused ) [ pauseInput setState : NSControlStateValueOn ];
@@ -388,11 +391,13 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     // Output section (label, device list, per-direction pause) — only when shown.
     if ( showOutput )
     {
-        [ menu addItemWithTitle : @"Forced output:" action : nil keyEquivalent : @"" ];
+        [ menu addItemWithTitle : NSLocalizedString(@"Forced output:", @"Output device section heading")
+                            action : nil
+                     keyEquivalent : @"" ];
         [ self appendDevicesForLock : outputLock toMenu : menu ];
 
         pauseOutput = [ menu
-                addItemWithTitle : @"Pause Output Lock"
+                addItemWithTitle : NSLocalizedString(@"Pause Output Lock", @"Pause output locking menu item")
                 action : @selector(manualPauseOutput:)
                 keyEquivalent : @"" ];
         if ( outputLock.paused ) [ pauseOutput setState : NSControlStateValueOn ];
@@ -401,17 +406,17 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     }
 
     startupItem = [ menu
-        addItemWithTitle : @"Open at login"
+        addItemWithTitle : NSLocalizedString(@"Open at login", @"Launch at login menu item")
         action : @selector(toggleStartupItem)
         keyEquivalent : @"" ];
 
     showInputItem = [ menu
-        addItemWithTitle : @"Show Input Options"
+        addItemWithTitle : NSLocalizedString(@"Show Input Options", @"Show input controls menu item")
         action : @selector(toggleShowInput)
         keyEquivalent : @"" ];
 
     showOutputItem = [ menu
-        addItemWithTitle : @"Show Output Options"
+        addItemWithTitle : NSLocalizedString(@"Show Output Options", @"Show output controls menu item")
         action : @selector(toggleShowOutput)
         keyEquivalent : @"" ];
 
@@ -419,7 +424,7 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     if ( showInput )
     {
         notificationsItem = [ menu
-            addItemWithTitle : @"Notify on forced input"
+            addItemWithTitle : NSLocalizedString(@"Notify on forced input", @"Input lock notification toggle")
             action : @selector(toggleNotifications)
             keyEquivalent : @"" ];
     }
@@ -427,7 +432,7 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     if ( showOutput )
     {
         outputNotificationsItem = [ menu
-            addItemWithTitle : @"Notify on forced output"
+            addItemWithTitle : NSLocalizedString(@"Notify on forced output", @"Output lock notification toggle")
             action : @selector(toggleOutputNotifications)
             keyEquivalent : @"" ];
     }
@@ -435,22 +440,22 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     [ menu addItem : [ NSMenuItem separatorItem ] ]; // A thin grey line
 
     NSMenuItem *soundItem = [ menu
-        addItemWithTitle : @"Sound settings…"
+        addItemWithTitle : NSLocalizedString(@"Sound settings…", @"Open macOS Sound settings menu item")
         action : @selector(openSoundSettings)
         keyEquivalent : @"" ];
 
     NSMenuItem *updateItem = [ menu
-        addItemWithTitle : @"Check for updates"
+        addItemWithTitle : NSLocalizedString(@"Check for updates", @"Check for app updates menu item")
         action : @selector(update)
         keyEquivalent : @"" ];
 
     NSMenuItem *aboutItem = [ menu
-        addItemWithTitle : @"About"
+        addItemWithTitle : NSLocalizedString(@"About", @"Show the About window menu item")
         action : @selector(showAbout)
         keyEquivalent : @"" ];
 
     NSMenuItem *quitItem = [ menu
-        addItemWithTitle : @"Quit"
+        addItemWithTitle : NSLocalizedString(@"Quit", @"Quit the app menu item")
         action : @selector(terminate)
         keyEquivalent : @"" ];
 
@@ -458,17 +463,17 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
         // App-control items carry SF Symbol icons; selectable device rows stay
         // icon-less (just a checkmark), so the icon vs no-icon contrast
         // distinguishes actions from device choices.
-        pauseInput.image = [NSImage imageWithSystemSymbolName:@"pause.circle" accessibilityDescription:@"Pause Input Lock"];
-        pauseOutput.image = [NSImage imageWithSystemSymbolName:@"pause.circle" accessibilityDescription:@"Pause Output Lock"];
-        startupItem.image = [NSImage imageWithSystemSymbolName:@"power" accessibilityDescription:@"Open at login"];
-        showInputItem.image = [NSImage imageWithSystemSymbolName:@"mic" accessibilityDescription:@"Show Input Options"];
-        showOutputItem.image = [NSImage imageWithSystemSymbolName:@"speaker.wave.2" accessibilityDescription:@"Show Output Options"];
-        notificationsItem.image = [NSImage imageWithSystemSymbolName:@"bell" accessibilityDescription:@"Notify on forced input"];
-        outputNotificationsItem.image = [NSImage imageWithSystemSymbolName:@"bell" accessibilityDescription:@"Notify on forced output"];
-        soundItem.image = [NSImage imageWithSystemSymbolName:@"gearshape" accessibilityDescription:@"Sound settings"];
-        updateItem.image = [NSImage imageWithSystemSymbolName:@"arrow.triangle.2.circlepath" accessibilityDescription:@"Check for updates"];
-        aboutItem.image = [NSImage imageWithSystemSymbolName:@"info.circle" accessibilityDescription:@"About"];
-        quitItem.image = [NSImage imageWithSystemSymbolName:@"xmark.circle" accessibilityDescription:@"Quit"];
+        pauseInput.image = [NSImage imageWithSystemSymbolName:@"pause.circle" accessibilityDescription:pauseInput.title];
+        pauseOutput.image = [NSImage imageWithSystemSymbolName:@"pause.circle" accessibilityDescription:pauseOutput.title];
+        startupItem.image = [NSImage imageWithSystemSymbolName:@"power" accessibilityDescription:startupItem.title];
+        showInputItem.image = [NSImage imageWithSystemSymbolName:@"mic" accessibilityDescription:showInputItem.title];
+        showOutputItem.image = [NSImage imageWithSystemSymbolName:@"speaker.wave.2" accessibilityDescription:showOutputItem.title];
+        notificationsItem.image = [NSImage imageWithSystemSymbolName:@"bell" accessibilityDescription:notificationsItem.title];
+        outputNotificationsItem.image = [NSImage imageWithSystemSymbolName:@"bell" accessibilityDescription:outputNotificationsItem.title];
+        soundItem.image = [NSImage imageWithSystemSymbolName:@"gearshape" accessibilityDescription:soundItem.title];
+        updateItem.image = [NSImage imageWithSystemSymbolName:@"arrow.triangle.2.circlepath" accessibilityDescription:updateItem.title];
+        aboutItem.image = [NSImage imageWithSystemSymbolName:@"info.circle" accessibilityDescription:aboutItem.title];
+        quitItem.image = [NSImage imageWithSystemSymbolName:@"xmark.circle" accessibilityDescription:quitItem.title];
     }
 
     [ self updateToggleStates ];
@@ -866,7 +871,8 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 
     // Version
     NSString *version = [[NSBundle mainBundle] infoDictionary][@"CFBundleShortVersionString"];
-    NSTextField *versionLabel = [NSTextField labelWithString:[NSString stringWithFormat:@"Version %@", version]];
+    NSTextField *versionLabel = [NSTextField labelWithString:[NSString stringWithFormat:
+        NSLocalizedString(@"Version %@", @"App version label"), version]];
     versionLabel.font = [NSFont systemFontOfSize:12];
     versionLabel.textColor = [NSColor secondaryLabelColor];
     versionLabel.alignment = NSTextAlignmentCenter;
@@ -1046,8 +1052,6 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
                     offendingName:(NSString *)offendingName
 {
     BOOL isInput = (lock.direction == AudioLockDirectionInput);
-    NSString *dirWord = isInput ? @"input" : @"output";
-
     // Per-direction minimum-gap throttle.
     NSDate *now = [NSDate date];
     NSDate *last = isInput ? lastInputNotificationTime : lastOutputNotificationTime;
@@ -1065,13 +1069,22 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 
     if ([prefs boolForKey:enabledKey] && notificationAuthGranted && !screenLocked) {
         UNMutableNotificationContent *content = [[UNMutableNotificationContent alloc] init];
-        content.title = isInput ? @"Forced input active" : @"Forced output active";
+        content.title = isInput
+            ? NSLocalizedString(@"Forced input active", @"Input lock notification title")
+            : NSLocalizedString(@"Forced output active", @"Output lock notification title");
 
-        NSString *forcedName = deviceName ?: @"selected device";
+        NSString *forcedName = deviceName ?:
+            NSLocalizedString(@"selected device", @"Fallback name for the locked audio device");
         if (offendingName != nil) {
-            content.body = [NSString stringWithFormat:@"%@ took %@ control. Forced %@ back to %@.", offendingName, dirWord, dirWord, forcedName];
+            NSString *format = isInput
+                ? NSLocalizedString(@"%@ took input control. Forced input back to %@.", @"Input lock notification with the device that took control")
+                : NSLocalizedString(@"%@ took output control. Forced output back to %@.", @"Output lock notification with the device that took control");
+            content.body = [NSString stringWithFormat:format, offendingName, forcedName];
         } else {
-            content.body = [NSString stringWithFormat:@"Another device took %@ control. Forced %@ back to %@.", dirWord, dirWord, forcedName];
+            NSString *format = isInput
+                ? NSLocalizedString(@"Another device took input control. Forced input back to %@.", @"Input lock notification without a known offending device")
+                : NSLocalizedString(@"Another device took output control. Forced output back to %@.", @"Output lock notification without a known offending device");
+            content.body = [NSString stringWithFormat:format, forcedName];
         }
 
         UNNotificationRequest *request = [UNNotificationRequest

@@ -17,6 +17,7 @@
 		335B96772199C07000F6D77B /* LICENSE in Resources */ = {isa = PBXBuildFile; fileRef = 335B96742199C07000F6D77B /* LICENSE */; };
 		335B96782199C07000F6D77B /* GBLaunchAtLogin.m in Sources */ = {isa = PBXBuildFile; fileRef = 335B96752199C07000F6D77B /* GBLaunchAtLogin.m */; };
 		335B96792199C07000F6D77B /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = 335B96762199C07000F6D77B /* README.md */; };
+		5A0000012F20000000000001 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 5A0000042F20000000000001 /* Localizable.strings */; };
 		88CCA3E62E8C94FA0034FB1C /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 88CCA3E52E8C94FA0034FB1C /* Sparkle */; };
 /* End PBXBuildFile section */
 
@@ -39,6 +40,8 @@
 		335B96762199C07000F6D77B /* README.md */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		335B967A2199C25A00F6D77B /* LICENSE */ = {isa = PBXFileReference; lastKnownFileType = text; path = LICENSE; sourceTree = SOURCE_ROOT; };
 		335B967B2199C25A00F6D77B /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = SOURCE_ROOT; };
+		5A0000022F20000000000001 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
+		5A0000032F20000000000001 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Localizable.strings"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -81,6 +84,7 @@
 				52BCABA87292405CA2EDE4CC /* AudioLock.m */,
 				3333F8A8219874D600816A9F /* Assets.xcassets */,
 				3333F8AA219874D600816A9F /* MainMenu.xib */,
+				5A0000042F20000000000001 /* Localizable.strings */,
 				3333F8AD219874D600816A9F /* Info.plist */,
 				3333F8AE219874D600816A9F /* main.m */,
 				335B967A2199C25A00F6D77B /* LICENSE */,
@@ -156,6 +160,7 @@
 			knownRegions = (
 				en,
 				Base,
+				"zh-Hans",
 			);
 			mainGroup = 3333F899219874D300816A9F;
 			packageReferences = (
@@ -181,6 +186,7 @@
 				3333F8AC219874D600816A9F /* MainMenu.xib in Resources */,
 				335B967121988E6700F6D77B /* airpods-icon.png in Resources */,
 				335B96772199C07000F6D77B /* LICENSE in Resources */,
+				5A0000012F20000000000001 /* Localizable.strings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -201,6 +207,15 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXVariantGroup section */
+		5A0000042F20000000000001 /* Localizable.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				5A0000022F20000000000001 /* en */,
+				5A0000032F20000000000001 /* zh-Hans */,
+			);
+			name = Localizable.strings;
+			sourceTree = "<group>";
+		};
 		3333F8AA219874D600816A9F /* MainMenu.xib */ = {
 			isa = PBXVariantGroup;
 			children = (
