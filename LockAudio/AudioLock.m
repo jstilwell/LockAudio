@@ -10,7 +10,9 @@
     NSString *_defaultsKey;
     NSString *_defaultsNameKey;
     NSString *_defaultsUIDKey;
+    NSMutableDictionary<NSNumber *, NSNumber *> *_participationCache;
 }
+
 
 - (instancetype)initWithDirection:(AudioLockDirection)direction
                       defaultsKey:(NSString *)defaultsKey
@@ -27,9 +29,60 @@
         _forcedName = nil;
         _forcedUID = nil;
         _paused = NO;
+        _participationCache = [NSMutableDictionary dictionary];
     }
     return self;
 }
+
++ (NSData *)connectedDeviceIDs
+{
+    AudioObjectPropertyAddress devicesAddress = {
+        kAudioHardwarePropertyDevices,
+        kAudioObjectPropertyScopeGlobal,
+        kAudioObjectPropertyElementMain
+    };
+
+    UInt32 propertySize = 0;
+    OSStatus status = AudioObjectGetPropertyDataSize(
+        kAudioObjectSystemObject,
+        &devicesAddress,
+        0,
+        NULL,
+        &propertySize);
+
+    if (status != noErr) {
+        NSLog(@"connectedDeviceIDs: size read failed (OSStatus %d)", (int)status);
+        return nil;
+    }
+    if (propertySize == 0) {
+        return [NSData data];
+    }
+
+    NSMutableData *data = [NSMutableData dataWithLength:propertySize];
+    status = AudioObjectGetPropertyData(
+        kAudioObjectSystemObject,
+        &devicesAddress,
+        0,
+        NULL,
+        &propertySize,
+        data.mutableBytes);
+
+    if (status != noErr) {
+        NSLog(@"connectedDeviceIDs: device list read failed (OSStatus %d)", (int)status);
+        return nil;
+    }
+
+    // The read reports how many bytes it actually filled; a device can vanish
+    // between the size query and the read, so trust the returned size.
+    data.length = propertySize - (propertySize % sizeof(AudioDeviceID));
+    return data;
+}
+
+- (void)invalidateDeviceCache
+{
+    [_participationCache removeAllObjects];
+}
+
 
 - (AudioObjectPropertySelector)defaultDeviceSelector
 {
@@ -85,7 +138,20 @@
 
 - (BOOL)deviceParticipates:(AudioDeviceID)deviceID
 {
+    NSNumber *cached = _participationCache[@(deviceID)];
+    if (cached != nil) {
+        return cached.boolValue;
+    }
+
+    BOOL participates = [self readDeviceParticipates:deviceID];
+    _participationCache[@(deviceID)] = @(participates);
+    return participates;
+}
+
+- (BOOL)readDeviceParticipates:(AudioDeviceID)deviceID
+{
     UInt32 propertySize = 0;
+
 
     AudioObjectPropertyAddress streamsAddress = {
         kAudioDevicePropertyStreams,
@@ -141,51 +207,37 @@
 
 - (NSString *)nameForDevice:(AudioDeviceID)deviceID
 {
-    char deviceName[256] = {0};
-    UInt32 nameSize = sizeof(deviceName);
-
-    AudioObjectPropertyAddress nameAddr = {
-        kAudioDevicePropertyDeviceName,
+    // kAudioObjectPropertyName is the CFString form of the deprecated
+    // kAudioDevicePropertyDeviceName (same value, so names persisted by older
+    // versions still match); it has no 256-byte truncation or encoding caveats.
+    AudioObjectPropertyAddress nameAddress = {
+        kAudioObjectPropertyName,
         kAudioObjectPropertyScopeGlobal,
         kAudioObjectPropertyElementMain
     };
 
+    CFStringRef name = NULL;
+    UInt32 propertySize = sizeof(name);
+
     OSStatus status = AudioObjectGetPropertyData(
         deviceID,
-        &nameAddr,
+        &nameAddress,
         0,
         NULL,
-        &nameSize,
-        deviceName);
+        &propertySize,
+        &name);
 
-    if (status != noErr) {
+    if (status != noErr || name == NULL) {
         return nil;
     }
 
-    // Bound the length to the buffer in case CoreAudio ever returns 256 bytes
-    // with no NUL terminator (stringWithUTF8String: would over-read).
-    NSUInteger len = strnlen(deviceName, sizeof(deviceName));
-
-    // Prefer UTF-8, but fall back to a lossy decode so a device whose name has
-    // non-UTF8 bytes still yields a stable string (name matching is only a
-    // legacy fallback to UID recovery; a consistent string is what matters).
-    NSString *name = [[NSString alloc] initWithBytes:deviceName
-                                              length:len
-                                            encoding:NSUTF8StringEncoding];
-    if (name == nil) {
-        name = [[NSString alloc] initWithBytes:deviceName
-                                        length:len
-                                      encoding:NSISOLatin1StringEncoding];
-    }
+    NSString *result = (__bridge_transfer NSString *)name;
 
     // An empty name can't identify or label a device; treat it as unreadable so
     // it never matches a forced selection or appears as a blank menu row.
-    if (name.length == 0) {
-        return nil;
-    }
-
-    return name;
+    return result.length > 0 ? result : nil;
 }
+
 
 - (AudioDeviceID)currentDefaultDevice
 {
@@ -209,7 +261,8 @@
     return deviceID;
 }
 
-- (AudioDeviceID)builtInDeviceInDevices:(AudioDeviceID *)devices
+- (AudioDeviceID)builtInDeviceInDevices:(const AudioDeviceID *)devices
+
                                   count:(int)numberOfDevices
 {
     AudioObjectPropertyAddress transportAddress = {
