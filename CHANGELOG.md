@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- On Apple Silicon Macs a fresh install now defaults the forced input to the built-in microphone, as intended. The default was previously found by looking for "Built-in" in the device name, which only Intel Macs use, so new installs on modern hardware forced nothing until a device was picked by hand.
+- The update feed now advertises the app's real minimum macOS version, so updates are no longer offered to Macs that can't run them.
+- Device enumeration is now robust to CoreAudio read failures (for example while the audio system restarts).
+
+### Changed
+
+- Requires macOS 13 (Ventura) or later. The shipped 2.0.x builds already required macOS 15.6 while the documentation said 10.14; this release lowers the real requirement and states it accurately.
+- Bursts of device changes (such as AirPods connecting) are coalesced into a single menu rebuild, cutting CoreAudio traffic and redundant re-forcing.
+- Updated Sparkle to 2.9.6, which includes several security fixes and brings the update window to the front reliably for menu bar apps.
+- Diagnostic logging now uses the unified logging system at debug level, so release builds no longer write a log entry for every audio event.
+
+
 ## 2.0.2 - 06-26-2026
 
 ### Fixed
