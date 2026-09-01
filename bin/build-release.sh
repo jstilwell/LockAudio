@@ -36,21 +36,28 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 ENV_FILE="$PROJECT_DIR/.env"
 
-if [ ! -f "$ENV_FILE" ]; then
-    echo -e "${RED}Error: .env file not found at $ENV_FILE${NC}"
-    echo "Copy .env.example to .env and fill in your values:"
-    echo "  cp .env.example .env"
-    exit 1
+# Variables already in the environment take precedence over .env. With
+# 1Password Environments, .env is a FIFO that only serves approved processes,
+# so a plain `source` from this script can read nothing; run the script as
+#   op run --env-file=.env -- ./bin/build-release.sh --upload
+# and the variables arrive pre-set. A regular .env (cp .env.example .env) is
+# still sourced as before.
+if [ -z "$R2_ACCOUNT_ID" ] && [ -e "$ENV_FILE" ]; then
+    # shellcheck source=/dev/null
+    source "$ENV_FILE"
 fi
 
-# shellcheck source=/dev/null
-source "$ENV_FILE"
+# Validate required configuration
+for var in R2_ACCOUNT_ID R2_BUCKET R2_APPCAST_PATH APPCAST_BASE_URL; do
+    if [ -z "${!var}" ] || [ "${!var}" = "your_account_id_here" ]; then
+        echo -e "${RED}Error: $var is not set.${NC}"
+        echo "Either create a regular .env (cp .env.example .env) or, with a"
+        echo "1Password-managed .env, run:"
+        echo "  op run --env-file=.env -- $0 $*"
+        exit 1
+    fi
+done
 
-# Validate required .env variables
-if [ -z "$R2_ACCOUNT_ID" ] || [ "$R2_ACCOUNT_ID" = "your_account_id_here" ]; then
-    echo -e "${RED}Error: R2_ACCOUNT_ID is not set in .env${NC}"
-    exit 1
-fi
 
 R2_ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
 APPCAST_PUBLIC_URL="${APPCAST_BASE_URL}/${R2_APPCAST_PATH}"
