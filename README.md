@@ -20,7 +20,7 @@ Your settings — locked devices, pause state, and which options are shown — p
 
 Download the latest DMG from the [releases page](https://github.com/jstilwell/LockAudio/releases), open it, and drag **LockAudio** to your Applications folder. The app is signed and notarized, and updates itself from then on.
 
-Requires macOS 10.14 or later.
+Requires macOS 13 (Ventura) or later.
 
 ---
 
