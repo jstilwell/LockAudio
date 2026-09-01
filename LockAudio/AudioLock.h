@@ -9,8 +9,19 @@
 
 #import <Foundation/Foundation.h>
 #import <CoreAudio/CoreAudio.h>
+#import <os/log.h>
 
 NS_ASSUME_NONNULL_BEGIN
+
+/// Shared unified-logging handle (subsystem com.lockaudio.app). Debug-level
+/// messages are not persisted in release builds and are visible live with
+/// `log stream --predicate 'process == "LockAudio"' --level debug` (which is
+/// what bin/test-build.sh tails). Object arguments must use %{public}@ or the
+/// log shows <private> in place of device names.
+os_log_t LockAudioLog(void);
+#define LADebug(fmt, ...) os_log_debug(LockAudioLog(), fmt, ##__VA_ARGS__)
+#define LAError(fmt, ...) os_log_error(LockAudioLog(), fmt, ##__VA_ARGS__)
+
 
 typedef NS_ENUM(NSUInteger, AudioLockDirection) {
     AudioLockDirectionInput,

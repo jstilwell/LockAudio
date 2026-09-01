@@ -5,7 +5,18 @@
 
 #import "AudioLock.h"
 
+os_log_t LockAudioLog(void)
+{
+    static os_log_t log;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        log = os_log_create("com.lockaudio.app", "audio");
+    });
+    return log;
+}
+
 @implementation AudioLock
+
 {
     NSString *_defaultsKey;
     NSString *_defaultsNameKey;
@@ -51,7 +62,7 @@
         &propertySize);
 
     if (status != noErr) {
-        NSLog(@"connectedDeviceIDs: size read failed (OSStatus %d)", (int)status);
+        LAError("connectedDeviceIDs: size read failed (OSStatus %d)", (int)status);
         return nil;
     }
     if (propertySize == 0) {
@@ -68,7 +79,7 @@
         data.mutableBytes);
 
     if (status != noErr) {
-        NSLog(@"connectedDeviceIDs: device list read failed (OSStatus %d)", (int)status);
+        LAError("connectedDeviceIDs: device list read failed (OSStatus %d)", (int)status);
         return nil;
     }
 
@@ -171,7 +182,7 @@
     // force/auto-pick/list a device we can't confirm has streams here; a
     // transiently-failed forced device simply recovers on the next rebuild.
     if (status != noErr) {
-        NSLog(@"deviceParticipates: stream-size read failed for device %u (OSStatus %d); treating as non-participating",
+        LAError("deviceParticipates: stream-size read failed for device %u (OSStatus %d); treating as non-participating",
               (unsigned int)deviceID, (int)status);
         return NO;
     }
