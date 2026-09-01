@@ -148,7 +148,7 @@ static const NSTimeInterval kRebuildCoalesceDelay = 0.15;
 
     if ( ![legacyDevice isKindOfClass:[NSNumber class]] && ![legacyDevice isKindOfClass:[NSString class]] )
     {
-        NSLog(@"Legacy Device preference has unexpected type %@; skipping migration", [legacyDevice class]);
+        LAError("Legacy Device preference has unexpected type %{public}@; skipping migration", [legacyDevice class]);
         return;
     }
 
@@ -182,7 +182,7 @@ static const NSTimeInterval kRebuildCoalesceDelay = 0.15;
         [prefs setBool:YES forKey:kPrefLaunchAtLogin];
     }
 
-    NSLog(@"Migrated settings from legacy bundle %@: Device=%ld name=%@",
+    LADebug("Migrated settings from legacy bundle %{public}@: Device=%ld name=%{public}@",
           kLegacyBundleIdentifier, (long)[legacyDevice integerValue], legacyDeviceName);
 }
 
@@ -251,7 +251,7 @@ static const NSTimeInterval kRebuildCoalesceDelay = 0.15;
 
     [self requestNotificationAuthorizationIfNeeded];
 
-    NSLog(@"Loaded input lock: %d (%@), output lock: %d (%@)",
+    LADebug("Loaded input lock: %d (%{public}@), output lock: %d (%{public}@)",
           inputLock.forcedID, inputLock.forcedName,
           outputLock.forcedID, outputLock.forcedName);
 
@@ -267,7 +267,7 @@ static const NSTimeInterval kRebuildCoalesceDelay = 0.15;
     // these on the main queue; scheduleRebuild coalesces the burst.
     __weak AppDelegate *weakSelf = self;
     deviceChangeListener = ^( UInt32 inNumberAddresses, const AudioObjectPropertyAddress *inAddresses ) {
-        NSLog( @"audio device change notification" );
+        LADebug("audio device change notification" );
         [weakSelf scheduleRebuild];
     };
 
@@ -318,7 +318,7 @@ static const NSTimeInterval kRebuildCoalesceDelay = 0.15;
 
     AudioLock *lock = (direction == AudioLockDirectionInput) ? inputLock : outputLock;
 
-    NSLog( @"switching %@ to new device : %u",
+    LADebug("switching %{public}@ to new device : %u",
            direction == AudioLockDirectionInput ? @"input" : @"output", newId );
 
     lock.forcedID = newId;
@@ -336,7 +336,7 @@ static const NSTimeInterval kRebuildCoalesceDelay = 0.15;
     }
 
     [lock saveToDefaults];
-    NSLog(@"Saved %@ device: %d (name: %@)",
+    LADebug("Saved %{public}@ device: %d (name: %{public}@)",
           direction == AudioLockDirectionInput ? @"input" : @"output",
           lock.forcedID, lock.forcedName);
 
@@ -366,7 +366,7 @@ static const NSTimeInterval kRebuildCoalesceDelay = 0.15;
     NSData *deviceData = [AudioLock connectedDeviceIDs];
     const AudioDeviceID *devices = deviceData.bytes;
     int numberOfDevices = (int)( deviceData.length / sizeof( AudioDeviceID ) );
-    NSLog( @"devices found : %i" , numberOfDevices );
+    LADebug("devices found : %i" , numberOfDevices );
     [inputLock invalidateDeviceCache];
     [outputLock invalidateDeviceCache];
 
@@ -557,7 +557,7 @@ static const NSTimeInterval kRebuildCoalesceDelay = 0.15;
                 NSString *uid = [lock uidForDevice:devices[index]];
                 if ( ![lock.forcedUID isEqualToString:uid] )
                 {
-                    NSLog( @"forced %@ id %u no longer confirms UID %@; re-resolving by UID",
+                    LADebug("forced %{public}@ id %u no longer confirms UID %{public}@; re-resolving by UID",
                            dirName, (unsigned int)lock.forcedID, lock.forcedUID );
                     break; // fall through to UID search.
                 }
@@ -570,12 +570,12 @@ static const NSTimeInterval kRebuildCoalesceDelay = 0.15;
                 NSString *uid = [lock uidForDevice:devices[index]];
                 if ( uid != nil )
                 {
-                    NSLog( @"backfilling %@ UID %@ for device %u", dirName, uid, (unsigned int)lock.forcedID );
+                    LADebug("backfilling %{public}@ UID %{public}@ for device %u", dirName, uid, (unsigned int)lock.forcedID );
                     lock.forcedUID = uid;
                     [lock saveToDefaults];
                 }
             }
-            NSLog( @"forced %@ found in device list", dirName );
+            LADebug("forced %{public}@ found in device list", dirName );
             return YES;
 
         }
@@ -593,7 +593,7 @@ static const NSTimeInterval kRebuildCoalesceDelay = 0.15;
             NSString *uid = [lock uidForDevice:devices[index]];
             if ( uid != nil && [uid isEqualToString:lock.forcedUID] )
             {
-                NSLog( @"forced %@ recovered by UID: %@ -> %u", dirName, uid, (unsigned int)devices[index] );
+                LADebug("forced %{public}@ recovered by UID: %{public}@ -> %u", dirName, uid, (unsigned int)devices[index] );
                 lock.forcedID = devices[index];
                 [lock saveToDefaults];
                 return YES;
@@ -613,7 +613,7 @@ static const NSTimeInterval kRebuildCoalesceDelay = 0.15;
             NSString *nameStr = [lock nameForDevice:devices[index]];
             if ( nameStr != nil && [nameStr isEqualToString:lock.forcedName] )
             {
-                NSLog( @"forced %@ recovered by name: %@ -> %u", dirName, nameStr, (unsigned int)devices[index] );
+                LADebug("forced %{public}@ recovered by name: %{public}@ -> %u", dirName, nameStr, (unsigned int)devices[index] );
                 lock.forcedID = devices[index];
                 lock.forcedUID = [lock uidForDevice:devices[index]];
                 [lock saveToDefaults];
@@ -622,7 +622,7 @@ static const NSTimeInterval kRebuildCoalesceDelay = 0.15;
         }
     }
 
-    NSLog( @"forced %@ device '%@' not connected; keeping saved selection for recovery", dirName, lock.forcedName );
+    LADebug("forced %{public}@ device '%{public}@' not connected; keeping saved selection for recovery", dirName, lock.forcedName );
     return NO;
 }
 
@@ -667,7 +667,7 @@ static const NSTimeInterval kRebuildCoalesceDelay = 0.15;
 
         if ( builtInName != nil )
         {
-            NSLog( @"setting default forced %@ : %@  %u", dirName, builtInName, (unsigned int)builtInID );
+            LADebug("setting default forced %{public}@ : %{public}@  %u", dirName, builtInName, (unsigned int)builtInID );
 
             lock.forcedID = builtInID;
             lock.forcedName = builtInName;
@@ -709,13 +709,13 @@ static const NSTimeInterval kRebuildCoalesceDelay = 0.15;
                     keyEquivalent : @"" ];
                 [ forcedItem setEnabled : NO ];
                 [ forcedItem setState : NSControlStateValueOn ];
-                NSLog( @"%@ forced device name unreadable; showing saved name '%@' (%u)",
+                LADebug("%{public}@ forced device name unreadable; showing saved name '%{public}@' (%u)",
                        dirName, lock.forcedName, (unsigned int)oneDeviceID );
             }
             continue;
         }
 
-        NSLog( @"found %@ device : %@  %u\n" , dirName, nameStr , (unsigned int)oneDeviceID );
+        LADebug("found %{public}@ device : %{public}@  %u" , dirName, nameStr , (unsigned int)oneDeviceID );
 
         NSMenuItem* item = [ targetMenu
 
@@ -727,7 +727,7 @@ static const NSTimeInterval kRebuildCoalesceDelay = 0.15;
         if ( oneDeviceID == lock.forcedID )
         {
             [ item setState : NSControlStateValueOn ];
-            NSLog( @"%@ device selected : %@  %u\n" , dirName, nameStr , (unsigned int)oneDeviceID );
+            LADebug("%{public}@ device selected : %{public}@  %u" , dirName, nameStr , (unsigned int)oneDeviceID );
         }
 
         idToName[ @((unsigned int)oneDeviceID) ] = nameStr;
@@ -735,11 +735,11 @@ static const NSTimeInterval kRebuildCoalesceDelay = 0.15;
 
     // Force the device if needed (the callback will trigger another listDevices)
     AudioDeviceID deviceID = [ lock currentDefaultDevice ];
-    NSLog( @"default %@ device is %u" , dirName, deviceID );
+    LADebug("default %{public}@ device is %u" , dirName, deviceID );
 
     if ( !lock.paused && forcedDeviceAvailable && deviceID != lock.forcedID )
     {
-        NSLog( @"forcing %@ device for default : %u" , dirName, lock.forcedID );
+        LADebug("forcing %{public}@ device for default : %u" , dirName, lock.forcedID );
 
         NSString *offendingName = idToName[ @((unsigned int)deviceID) ];
 
@@ -751,7 +751,7 @@ static const NSTimeInterval kRebuildCoalesceDelay = 0.15;
         {
             if ( suppress )
             {
-                NSLog( @"suppressing forced-%@ notification for user-initiated switch", dirName );
+                LADebug("suppressing forced-%{public}@ notification for user-initiated switch", dirName );
             }
             else
             {
@@ -762,7 +762,7 @@ static const NSTimeInterval kRebuildCoalesceDelay = 0.15;
         }
         else
         {
-            NSLog( @"force %@ failed: OSStatus %d", dirName, (int)forceStatus );
+            LAError("force %{public}@ failed: OSStatus %d", dirName, (int)forceStatus );
         }
 
         // No need to dispatch listDevices here — the CoreAudio property
@@ -781,13 +781,13 @@ static const NSTimeInterval kRebuildCoalesceDelay = 0.15;
 
         if ( builtInID != kAudioDeviceUnknown && deviceID != builtInID )
         {
-            NSLog( @"forced %@ device '%@' not connected; falling back to built-in %u",
+            LADebug("forced %{public}@ device '%{public}@' not connected; falling back to built-in %u",
                    dirName, lock.forcedName, (unsigned int)builtInID );
 
             OSStatus forceStatus = [ lock applyForce : builtInID ];
             if ( forceStatus != noErr )
             {
-                NSLog( @"fallback %@ force failed: OSStatus %d", dirName, (int)forceStatus );
+                LAError("fallback %{public}@ force failed: OSStatus %d", dirName, (int)forceStatus );
             }
             // No notification: a disconnect-driven fallback to built-in isn't the
             // same event as another device stealing the lock, and notifying on
@@ -796,7 +796,7 @@ static const NSTimeInterval kRebuildCoalesceDelay = 0.15;
         }
         else
         {
-            NSLog( @"forced %@ device '%@' not connected; no built-in fallback applied (built-in %u, current default %u)",
+            LADebug("forced %{public}@ device '%{public}@' not connected; no built-in fallback applied (built-in %u, current default %u)",
                    dirName, lock.forcedName, (unsigned int)builtInID, (unsigned int)deviceID );
         }
     }
@@ -1059,7 +1059,7 @@ static const NSTimeInterval kRebuildCoalesceDelay = 0.15;
     [center requestAuthorizationWithOptions:(UNAuthorizationOptionAlert | UNAuthorizationOptionSound)
                           completionHandler:^(BOOL granted, NSError * _Nullable error) {
         if (error) {
-            NSLog(@"Notification auth error: %@", error);
+            LAError("Notification auth error: %{public}@", error);
         }
         self->notificationAuthGranted = granted;
     }];
@@ -1107,7 +1107,7 @@ static const NSTimeInterval kRebuildCoalesceDelay = 0.15;
             addNotificationRequest:request
              withCompletionHandler:^(NSError * _Nullable error) {
                  if (error) {
-                     NSLog(@"Failed to post notification: %@", error);
+                     LAError("Failed to post notification: %{public}@", error);
                  }
              }];
     }
