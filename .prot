@@ -1,7 +1,0 @@
-# dotprot — managed below, do not edit
-vault: 6djqbcxlh232272hbuvtuqnr4i
-doc .env: uf64hgdkbcjflhf2m6hhr7w654
-doc .env.example: 3q5fgneupcqgjcs5tkqn5jjz34
-
-# ---- your files (edit below) ----
-.env*
