@@ -57,6 +57,13 @@ static NSString* const kLegacyBundleIdentifier = @"com.audio.locker";
 // and suppress; legitimate user-driven switches always exceed this easily.
 static const NSTimeInterval kMinNotificationGap = 2.0;
 
+// How long to wait for a burst of CoreAudio notifications to settle before
+// rebuilding. A single device connect fires the device-list listener and both
+// default-device listeners in quick succession; each rebuild costs several
+// CoreAudio round-trips per device, so collapse the burst into one rebuild.
+static const NSTimeInterval kRebuildCoalesceDelay = 0.15;
+
+
 
 @interface AppDelegate ( )
 {
@@ -80,9 +87,13 @@ static const NSTimeInterval kMinNotificationGap = 2.0;
     BOOL notificationAuthGranted;
     BOOL screenLocked;
     NSWindow* aboutWindow;
+    // Shared listener block for all three CoreAudio property listeners.
+    AudioObjectPropertyListenerBlock deviceChangeListener;
+    // Bumped on every scheduled rebuild and on every actual rebuild; a pending
+    // coalesced rebuild only runs if nothing newer superseded it.
+    NSUInteger rebuildGeneration;
 }
 
-@property (weak) IBOutlet NSWindow *window;
 @property (strong) SPUStandardUpdaterController *updaterController;
 
 @end
@@ -91,20 +102,21 @@ static const NSTimeInterval kMinNotificationGap = 2.0;
 @implementation AppDelegate
 
 
-OSStatus callbackFunction(  AudioObjectID inObjectID,
-                            UInt32 inNumberAddresses,
-                            const AudioObjectPropertyAddress inAddresses[],
-                            void *inClientData)
+// Coalesces CoreAudio notifications into a single menu rebuild / re-force.
+// Always called on the main queue (the listeners are registered on it).
+- ( void ) scheduleRebuild
 {
-
-    NSLog( @"default device changed" );
-    AppDelegate *delegate = (__bridge AppDelegate *)inClientData;
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [delegate listDevices];
+    NSUInteger generation = ++rebuildGeneration;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kRebuildCoalesceDelay * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        if ( generation != self->rebuildGeneration )
+        {
+            return; // superseded by a later notification or an explicit rebuild
+        }
+        [self listDevices];
     });
-
-    return 0;
 }
+
 
 
 // Copies the user's settings from the pre-rename app (com.audio.locker) into
@@ -134,7 +146,14 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
         return;
     }
 
+    if ( ![legacyDevice isKindOfClass:[NSNumber class]] && ![legacyDevice isKindOfClass:[NSString class]] )
+    {
+        NSLog(@"Legacy Device preference has unexpected type %@; skipping migration", [legacyDevice class]);
+        return;
+    }
+
     [prefs setInteger:[legacyDevice integerValue] forKey:@"Device"];
+
 
     id legacyDeviceName = (__bridge_transfer id)CFPreferencesCopyAppValue(
         CFSTR("DeviceName"), legacyID);
@@ -243,54 +262,42 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     statusItem.button.toolTip = @"LockAudio";
     statusItem.button.image = image;
 
-    // Listen for changes to the default input and output devices.
+    // Listen for changes to the default input and output devices, and for the
+    // device list itself changing (devices added/removed). CoreAudio delivers
+    // these on the main queue; scheduleRebuild coalesces the burst.
+    __weak AppDelegate *weakSelf = self;
+    deviceChangeListener = ^( UInt32 inNumberAddresses, const AudioObjectPropertyAddress *inAddresses ) {
+        NSLog( @"audio device change notification" );
+        [weakSelf scheduleRebuild];
+    };
+
     AudioObjectPropertyAddress inputDeviceAddress = [inputLock defaultDeviceListenerAddress];
-    AudioObjectAddPropertyListener(
+    AudioObjectAddPropertyListenerBlock(
         kAudioObjectSystemObject,
         &inputDeviceAddress,
-        &callbackFunction,
-        (__bridge  void* ) self );
+        dispatch_get_main_queue(),
+        deviceChangeListener );
 
     AudioObjectPropertyAddress outputDeviceAddress = [outputLock defaultDeviceListenerAddress];
-    AudioObjectAddPropertyListener(
+    AudioObjectAddPropertyListenerBlock(
         kAudioObjectSystemObject,
         &outputDeviceAddress,
-        &callbackFunction,
-        (__bridge  void* ) self );
+        dispatch_get_main_queue(),
+        deviceChangeListener );
 
-    // Listen for device list changes (devices added/removed)
     AudioObjectPropertyAddress devicesChangedAddress = {
         kAudioHardwarePropertyDevices,
         kAudioObjectPropertyScopeGlobal,
         kAudioObjectPropertyElementMain
     };
-
-    AudioObjectAddPropertyListener(
+    AudioObjectAddPropertyListenerBlock(
         kAudioObjectSystemObject,
         &devicesChangedAddress,
-        &callbackFunction,
-        (__bridge  void* ) self );
-
-    // Set the runloop to the main runloop for CoreAudio callbacks
-    AudioObjectPropertyAddress runLoopAddress = {
-        kAudioHardwarePropertyRunLoop,
-        kAudioObjectPropertyScopeGlobal,
-        kAudioObjectPropertyElementMain
-    };
-
-    CFRunLoopRef runLoop = CFRunLoopGetCurrent();
-
-    UInt32 size = sizeof(CFRunLoopRef);
-
-    AudioObjectSetPropertyData(
-        kAudioObjectSystemObject,
-        &runLoopAddress,
-        0,
-        NULL,
-        size,
-        &runLoop);
+        dispatch_get_main_queue(),
+        deviceChangeListener );
 
     [ self listDevices ];
+
 
 }
 
@@ -350,7 +357,21 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     }
     rebuildingMenu = YES;
 
+    // This rebuild covers any notification that arrived before it; drop any
+    // coalesced rebuild still pending for those.
+    rebuildGeneration++;
+
+    // Enumerate devices once and share the list between both locks; each lock
+    // also memoizes its per-device stream check for the duration of the rebuild.
+    NSData *deviceData = [AudioLock connectedDeviceIDs];
+    const AudioDeviceID *devices = deviceData.bytes;
+    int numberOfDevices = (int)( deviceData.length / sizeof( AudioDeviceID ) );
+    NSLog( @"devices found : %i" , numberOfDevices );
+    [inputLock invalidateDeviceCache];
+    [outputLock invalidateDeviceCache];
+
     NSDictionary *bundleInfo = [ [ NSBundle mainBundle] infoDictionary];
+
     NSString *versionString = [ NSString stringWithFormat : @"Version %@",
                                bundleInfo[ @"CFBundleShortVersionString" ] ];
 
@@ -374,7 +395,8 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     if ( showInput )
     {
         [ menu addItemWithTitle : @"Forced input:" action : nil keyEquivalent : @"" ];
-        [ self appendDevicesForLock : inputLock toMenu : menu ];
+        [ self appendDevicesForLock : inputLock toMenu : menu devices : devices count : numberOfDevices ];
+
 
         pauseInput = [ menu
                 addItemWithTitle : @"Pause Input Lock"
@@ -389,7 +411,8 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     if ( showOutput )
     {
         [ menu addItemWithTitle : @"Forced output:" action : nil keyEquivalent : @"" ];
-        [ self appendDevicesForLock : outputLock toMenu : menu ];
+        [ self appendDevicesForLock : outputLock toMenu : menu devices : devices count : numberOfDevices ];
+
 
         pauseOutput = [ menu
                 addItemWithTitle : @"Pause Output Lock"
@@ -499,8 +522,9 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 // persisted. When the device isn't connected we keep the saved id/name/UID
 // untouched so it can recover later.
 - ( BOOL ) resolveForcedDeviceForLock : ( AudioLock* ) lock
-                            inDevices : ( AudioDeviceID* ) devices
+                            inDevices : ( const AudioDeviceID* ) devices
                                 count : ( int ) numberOfDevices
+
 {
     NSString *dirName = ( lock.direction == AudioLockDirectionInput ) ? @"input" : @"output";
 
@@ -538,8 +562,22 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
                     break; // fall through to UID search.
                 }
             }
+            else
+            {
+                // Install saved before UIDs were persisted. Backfill now so the
+                // id gets UID-confirmed from here on, instead of waiting for a
+                // disconnect to route through the name fallback.
+                NSString *uid = [lock uidForDevice:devices[index]];
+                if ( uid != nil )
+                {
+                    NSLog( @"backfilling %@ UID %@ for device %u", dirName, uid, (unsigned int)lock.forcedID );
+                    lock.forcedUID = uid;
+                    [lock saveToDefaults];
+                }
+            }
             NSLog( @"forced %@ found in device list", dirName );
             return YES;
+
         }
     }
 
@@ -592,38 +630,13 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 // participating device (checkmark on the forced one), and re-applies the force
 // if another device has stolen the default. Ported from the original
 // single-direction listDevices logic.
-- ( void ) appendDevicesForLock : ( AudioLock* ) lock toMenu : ( NSMenu* ) targetMenu
+- ( void ) appendDevicesForLock : ( AudioLock* ) lock
+                          toMenu : ( NSMenu* ) targetMenu
+                         devices : ( const AudioDeviceID* ) dev_array
+                           count : ( int ) numberOfDevices
 {
-    UInt32 propertySize;
-
-    // Get device count dynamically
-    AudioObjectPropertyAddress devicesAddress = {
-        kAudioHardwarePropertyDevices,
-        kAudioObjectPropertyScopeGlobal,
-        kAudioObjectPropertyElementMain
-    };
-
-    AudioObjectGetPropertyDataSize(
-        kAudioObjectSystemObject,
-        &devicesAddress,
-        0,
-        NULL,
-        &propertySize);
-
-    int numberOfDevices = ( propertySize / sizeof( AudioDeviceID ) );
-    AudioDeviceID *dev_array = (AudioDeviceID *)malloc(propertySize);
-
-    AudioObjectGetPropertyData(
-        kAudioObjectSystemObject,
-        &devicesAddress,
-        0,
-        NULL,
-        &propertySize,
-        dev_array);
-
-    NSLog( @"devices found : %i" , numberOfDevices );
-
-    BOOL isInput = ( lock.direction == AudioLockDirectionInput );
+    BOOL isInput
+ = ( lock.direction == AudioLockDirectionInput );
     NSString *dirName = isInput ? @"input" : @"output";
 
     // Maps deviceID -> name for the participating devices, used to name the
@@ -787,9 +800,8 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
                    dirName, lock.forcedName, (unsigned int)builtInID, (unsigned int)deviceID );
         }
     }
-
-    free(dev_array);
 }
+
 
 
 - ( void ) manualPauseInput : ( NSMenuItem* ) item
@@ -832,7 +844,12 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
     if (aboutWindow == nil) {
         aboutWindow = [self buildAboutWindow];
     }
-    [NSApp activateIgnoringOtherApps:YES];
+    if (@available(macOS 14.0, *)) {
+        [NSApp activate];
+    } else {
+        [NSApp activateIgnoringOtherApps:YES];
+    }
+
     [aboutWindow center];
     [aboutWindow makeKeyAndOrderFront:nil];
 }

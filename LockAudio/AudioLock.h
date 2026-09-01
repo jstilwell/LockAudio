@@ -68,16 +68,31 @@ typedef NS_ENUM(NSUInteger, AudioLockDirection) {
 /// Persists the current forcedID (and forcedName when non-nil) to NSUserDefaults.
 - (void)saveToDefaults;
 
-/// YES if `deviceID` has at least one stream in this lock's direction.
+/// Reads the system's current device list (kAudioHardwarePropertyDevices) as
+/// a packed array of AudioDeviceID. Returns nil if CoreAudio can't be queried
+/// (e.g. while coreaudiod restarts) — callers must treat that as "no devices",
+/// never as an error to act on. Fetch this once per rebuild and share it
+/// between locks; it's an IPC round-trip.
++ (nullable NSData *)connectedDeviceIDs;
+
+/// YES if `deviceID` has at least one stream in this lock's direction. Results
+/// are memoized until `invalidateDeviceCache` so a rebuild that asks about the
+/// same device several times pays for one CoreAudio round-trip.
 - (BOOL)deviceParticipates:(AudioDeviceID)deviceID;
+
+/// Drops memoized per-device answers. Call at the start of every rebuild; the
+/// device list can change between CoreAudio notifications.
+- (void)invalidateDeviceCache;
+
 
 /// Reads the stable persistent UID (kAudioDevicePropertyDeviceUID) for a device,
 /// or nil if it can't be read. This UID survives disconnect/reconnect even
 /// though the AudioDeviceID does not.
 - (nullable NSString *)uidForDevice:(AudioDeviceID)deviceID;
 
-/// Reads a device's display name (kAudioDevicePropertyDeviceName), or nil if it
-/// can't be read.
+/// Reads a device's display name (kAudioObjectPropertyName), or nil if it
+/// can't be read or is empty.
+
 - (nullable NSString *)nameForDevice:(AudioDeviceID)deviceID;
 
 /// Reads the system's current default device for this direction.
@@ -89,8 +104,9 @@ typedef NS_ENUM(NSUInteger, AudioLockDirection) {
 /// localized name. Returns kAudioDeviceUnknown if there is no participating
 /// built-in device. Used as the fallback target when the forced device
 /// disconnects, so macOS doesn't pick an arbitrary other device.
-- (AudioDeviceID)builtInDeviceInDevices:(AudioDeviceID *)devices
+- (AudioDeviceID)builtInDeviceInDevices:(const AudioDeviceID *)devices
                                   count:(int)numberOfDevices;
+
 
 /// Sets the system's default device for this direction. Returns the OSStatus.
 - (OSStatus)applyForce:(AudioDeviceID)deviceID;
