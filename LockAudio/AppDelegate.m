@@ -640,8 +640,33 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
                                                         inDevices:dev_array
                                                             count:numberOfDevices];
 
+    // Default the INPUT lock to the built-in microphone when nothing has ever
+    // been saved. Output locking is opt-in, so it has no default device. The
+    // built-in device is identified by CoreAudio transport type rather than by
+    // name: Intel Macs call it "Built-in Microphone" but Apple Silicon Macs use
+    // "MacBook Pro Microphone" / "Mac Studio Speakers", so a name heuristic
+    // silently matched nothing on modern hardware.
+    if ( isInput && !forcedDeviceAvailable
+         && lock.forcedID == UINT32_MAX && lock.forcedName == nil && lock.forcedUID == nil )
+    {
+        AudioDeviceID builtInID = [ lock builtInDeviceInDevices : dev_array
+                                                          count : numberOfDevices ];
+        NSString *builtInName = ( builtInID != kAudioDeviceUnknown ) ? [ lock nameForDevice : builtInID ] : nil;
+
+        if ( builtInName != nil )
+        {
+            NSLog( @"setting default forced %@ : %@  %u", dirName, builtInName, (unsigned int)builtInID );
+
+            lock.forcedID = builtInID;
+            lock.forcedName = builtInName;
+            lock.forcedUID = [lock uidForDevice:builtInID];
+            forcedDeviceAvailable = YES;
+            [lock saveToDefaults];
+        }
+    }
 
     for( int index = 0 ;
+
              index < numberOfDevices ;
              index++ )
     {
@@ -680,21 +705,8 @@ OSStatus callbackFunction(  AudioObjectID inObjectID,
 
         NSLog( @"found %@ device : %@  %u\n" , dirName, nameStr , (unsigned int)oneDeviceID );
 
-        // Default the INPUT lock to the built-in device when nothing is saved.
-        // Output locking is opt-in, so it has no default device.
-        if ( isInput && [ [ nameStr lowercaseString ] containsString : @"built" ]
-             && lock.forcedID == UINT32_MAX && lock.forcedName == nil )
-        {
-            NSLog( @"setting default forced %@ : %@  %u\n" , dirName, nameStr , (unsigned int)oneDeviceID );
-
-            lock.forcedID = oneDeviceID;
-            lock.forcedName = nameStr;
-            lock.forcedUID = [lock uidForDevice:oneDeviceID];
-            forcedDeviceAvailable = YES;
-            [lock saveToDefaults];
-        }
-
         NSMenuItem* item = [ targetMenu
+
             addItemWithTitle : nameStr
             action : @selector(deviceSelected:)
             keyEquivalent : @"" ];
