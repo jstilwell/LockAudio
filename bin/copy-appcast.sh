@@ -6,12 +6,20 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 ENV_FILE="$PROJECT_DIR/.env"
 
-if [ ! -f "$ENV_FILE" ]; then
-    echo "Error: .env file not found. Copy .env.example to .env and fill in your values."
-    exit 1
+# See build-release.sh: pre-set variables win (op run --env-file=.env -- ...),
+# otherwise source a regular .env.
+if [ -z "$R2_ACCOUNT_ID" ] && [ -e "$ENV_FILE" ]; then
+    # shellcheck source=/dev/null
+    source "$ENV_FILE"
 fi
+for var in R2_ACCOUNT_ID R2_BUCKET R2_APPCAST_PATH APPCAST_BASE_URL; do
+    if [ -z "${!var}" ]; then
+        echo "Error: $var is not set. Create a regular .env (cp .env.example .env) or run:"
+        echo "  op run --env-file=.env -- $0"
+        exit 1
+    fi
+done
 
-source "$ENV_FILE"
 
 R2_ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
 
