@@ -90,7 +90,7 @@ if [ -z "$SPARKLE_BIN" ]; then
 fi
 
 SIGN_UPDATE="$SPARKLE_BIN/sign_update"
-GENERATE_APPCAST="$SPARKLE_BIN/generate_appcast"
+
 
 # Get version from Info.plist
 VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$PLIST_PATH")
@@ -162,7 +162,19 @@ if [ "$CURRENT_FEED_URL" != "$APPCAST_PUBLIC_URL" ]; then
     /usr/libexec/PlistBuddy -c "Set :SUFeedURL $APPCAST_PUBLIC_URL" "$PLIST_PATH"
 fi
 
+# A release must be cut from committed code: the tag created below points at
+# HEAD, and the plist syncs above may have just modified Info.plist. Refuse to
+# tag a dirty tree so the tag always contains exactly what was built.
+if [ "$UPLOAD_TO_GITHUB" = true ] && [ -n "$(git status --porcelain)" ]; then
+    echo -e "${RED}Error: working tree has uncommitted changes.${NC}"
+    git status --short
+    echo ""
+    echo "Commit them (including any Info.plist sync made just now) and re-run."
+    exit 1
+fi
+
 # Check if version tag already exists on GitHub
+
 if command -v gh &> /dev/null && gh auth status &> /dev/null 2>&1; then
     if gh release view "v${VERSION}" --repo jstilwell/LockAudio &> /dev/null; then
         echo -e "${RED}Error: Version ${VERSION} already exists on GitHub!${NC}"
@@ -399,10 +411,11 @@ EOF
 echo -e "${GREEN}appcast.xml generated with release notes from CHANGELOG.md!${NC}"
 echo ""
 
-upload_appcast_to_r2 || echo -e "${YELLOW}Skipping R2 upload. You can manually upload appcast.xml later.${NC}"
-
-# Upload to GitHub if requested
+# Publish order matters: the appcast points at the GitHub release asset, so the
+# release (with the DMG attached) must exist before the appcast goes live or
+# Sparkle clients that poll in between get a 404 on the download.
 if [ "$UPLOAD_TO_GITHUB" = true ]; then
+
     echo -e "${YELLOW}Uploading to GitHub...${NC}"
 
     # Check if gh is installed
@@ -419,22 +432,34 @@ if [ "$UPLOAD_TO_GITHUB" = true ]; then
         exit 1
     fi
 
-    # Create the release
+    # Create the release. Tag the commit that was actually built (--target):
+    # without it gh tags the repo's default branch, which is wrong when
+    # releasing from a branch that hasn't been merged yet.
     echo ""
     echo "Creating release v${VERSION}..."
     gh release create "v${VERSION}" \
         "${DMG_PATH}" \
         --title "Version ${VERSION}" \
         --notes "$GITHUB_NOTES" \
+        --target "$(git rev-parse HEAD)" \
         --repo jstilwell/LockAudio
 
     echo -e "${GREEN}Release created successfully!${NC}"
     echo "View at: https://github.com/jstilwell/LockAudio/releases/tag/v${VERSION}"
+
+    upload_appcast_to_r2 || {
+        echo -e "${YELLOW}Appcast not published. Once the GitHub release is confirmed, run:${NC}"
+        echo "     ./bin/copy-appcast.sh"
+    }
 else
     echo -e "${YELLOW}Next steps:${NC}"
-    echo "  Create GitHub release and upload DMG:"
-    echo "     ./bin/build-release.sh --upload"
+    echo "  1. Create the GitHub release and upload the DMG:"
+    echo "        ./bin/build-release.sh --upload"
+    echo "     (or create it by hand from ${DMG_PATH})"
+    echo "  2. Only then publish the appcast so Sparkle clients can download it:"
+    echo "        ./bin/copy-appcast.sh"
 fi
+
 
 echo ""
 echo -e "${GREEN}Done!${NC}"

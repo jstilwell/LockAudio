@@ -349,7 +349,6 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 2.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.lockaudio.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 			};
@@ -371,7 +370,6 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 2.0.0;
 				OTHER_CODE_SIGN_FLAGS = "--timestamp --deep";
 				PRODUCT_BUNDLE_IDENTIFIER = com.lockaudio.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
