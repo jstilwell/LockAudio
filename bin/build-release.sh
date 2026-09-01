@@ -197,6 +197,17 @@ if [ ! -d "$RELEASE_DIR/$APP_NAME" ]; then
     exit 1
 fi
 
+# The appcast's minimumSystemVersion must match what the binary actually
+# requires, otherwise Sparkle offers the update to users whose macOS can't run
+# it. Read it from the built app rather than hard-coding it.
+MIN_SYSTEM_VERSION=$(/usr/libexec/PlistBuddy -c "Print LSMinimumSystemVersion" "$RELEASE_DIR/$APP_NAME/Contents/Info.plist")
+if [ -z "$MIN_SYSTEM_VERSION" ]; then
+    echo -e "${RED}Error: Could not read LSMinimumSystemVersion from built app${NC}"
+    exit 1
+fi
+echo -e "${GREEN}Built app requires macOS ${MIN_SYSTEM_VERSION}+${NC}"
+
+
 # Create DMG
 DMG_NAME="LockAudio-${VERSION}.dmg"
 DMG_PATH="$RELEASE_DIR/$DMG_NAME"
@@ -378,7 +389,8 @@ ${APPCAST_FEATURES}        </ul>
         length="${FILE_SIZE}"
         type="application/octet-stream"
         sparkle:edSignature="${ED_SIGNATURE}" />
-      <sparkle:minimumSystemVersion>10.14</sparkle:minimumSystemVersion>
+      <sparkle:minimumSystemVersion>${MIN_SYSTEM_VERSION}</sparkle:minimumSystemVersion>
+
     </item>
   </channel>
 </rss>
