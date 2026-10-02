@@ -89,15 +89,6 @@ NOTARY_PREFLIGHT=$(xcrun notarytool history --keychain-profile "notarytool-profi
 }
 echo -e "${GREEN}Notarization credentials OK${NC}"
 
-# Get Sparkle tools path
-SPARKLE_BIN=$(find ~/Library/Developer/Xcode/DerivedData -path "*/SourcePackages/artifacts/sparkle/Sparkle/bin" -type d 2>/dev/null | head -1)
-if [ -z "$SPARKLE_BIN" ]; then
-    echo -e "${RED}Error: Could not find Sparkle tools. Make sure the project has been built at least once.${NC}"
-    exit 1
-fi
-
-SIGN_UPDATE="$SPARKLE_BIN/sign_update"
-
 
 # Get version from Info.plist
 VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$PLIST_PATH")
@@ -216,6 +207,18 @@ if [ ! -d "$RELEASE_DIR/$APP_NAME" ]; then
     exit 1
 fi
 
+# Use the Sparkle tools from *this* project's resolved package, not whichever
+# project's DerivedData a global search happens to hit first (which could be a
+# different Sparkle version). BUILD_DIR is <DerivedData>/Build/Products.
+BUILD_PRODUCTS_DIR=$(xcodebuild -project "$PROJECT_FILE" -scheme "$SCHEME" -showBuildSettings 2>/dev/null \
+    | awk -F' = ' '/^ *BUILD_DIR = /{print $2; exit}')
+DERIVED_DATA_DIR=$(dirname "$(dirname "$BUILD_PRODUCTS_DIR")")
+SIGN_UPDATE="$DERIVED_DATA_DIR/SourcePackages/artifacts/sparkle/Sparkle/bin/sign_update"
+if [ ! -x "$SIGN_UPDATE" ]; then
+    echo -e "${RED}Error: Sparkle's sign_update not found at $SIGN_UPDATE${NC}"
+    exit 1
+fi
+
 # The appcast's minimumSystemVersion must match what the binary actually
 # requires, otherwise Sparkle offers the update to users whose macOS can't run
 # it. Read it from the built app rather than hard-coding it.
@@ -251,74 +254,40 @@ hdiutil create -volname "$PROJECT_NAME" \
 # Clean up temp directory
 rm -rf "$DMG_TEMP"
 
-# Notarize the DMG
-echo -e "${YELLOW}Submitting DMG for notarization...${NC}"
-
-# Submit for notarization (don't wait)
-NOTARY_SUBMIT_OUTPUT=$(xcrun notarytool submit "$DMG_PATH" \
+# Notarize the DMG. Any outcome other than "Accepted" aborts the release: a
+# DMG that isn't notarized and stapled is blocked by Gatekeeper for every new
+# download, so it must never reach GitHub or the appcast.
+echo -e "${YELLOW}Submitting DMG for notarization (waiting up to 30 minutes)...${NC}"
+NOTARY_OUTPUT=$(xcrun notarytool submit "$DMG_PATH" \
     --keychain-profile "notarytool-profile" \
-    --output-format json 2>&1)
-SUBMISSION_ID=$(echo "$NOTARY_SUBMIT_OUTPUT" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+    --wait --timeout 30m \
+    --output-format json 2>&1) || true
+SUBMISSION_ID=$(echo "$NOTARY_OUTPUT" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+NOTARY_STATUS=$(echo "$NOTARY_OUTPUT" | grep -o '"status":"[^"]*"' | tail -1 | cut -d'"' -f4)
 
-if [ -z "$SUBMISSION_ID" ]; then
-    echo -e "${RED}Error: Failed to submit for notarization${NC}"
-    if echo "$NOTARY_SUBMIT_OUTPUT" | grep -qi "agreement"; then
+if [ "$NOTARY_STATUS" != "Accepted" ]; then
+    echo -e "${RED}Notarization did not succeed (status: ${NOTARY_STATUS:-none}). Release aborted.${NC}"
+    if echo "$NOTARY_OUTPUT" | grep -qi "agreement"; then
         echo -e "${RED}An Apple Developer agreement needs to be accepted.${NC}"
         echo "  Accept pending agreements at:"
         echo "    https://developer.apple.com/account"
         echo "    https://appstoreconnect.apple.com/ → Business → Agreements, Tax, and Banking"
-        echo "  Then retry manually:"
-        echo "    xcrun notarytool submit \"$DMG_PATH\" --keychain-profile \"notarytool-profile\""
     else
-        echo "Raw error:"
-        echo "$NOTARY_SUBMIT_OUTPUT"
-        echo ""
-        echo "You can manually notarize later with:"
-        echo "  xcrun notarytool submit \"$DMG_PATH\" --keychain-profile \"notarytool-profile\""
+        echo "Raw output:"
+        echo "$NOTARY_OUTPUT"
     fi
-else
-    echo -e "${GREEN}Submitted for notarization!${NC}"
-    echo "Submission ID: $SUBMISSION_ID"
-    echo ""
-    echo -e "${YELLOW}Waiting for notarization to complete (this may take a few minutes)...${NC}"
-
-    # Wait for notarization with timeout
-    TIMEOUT=300  # 5 minutes
-    ELAPSED=0
-    while [ $ELAPSED -lt $TIMEOUT ]; do
-        STATUS=$(xcrun notarytool info "$SUBMISSION_ID" \
-            --keychain-profile "notarytool-profile" \
-            --output-format json 2>&1 | grep -o '"status":"[^"]*"' | cut -d'"' -f4)
-
-        if [ "$STATUS" = "Accepted" ]; then
-            echo -e "${GREEN}Notarization successful!${NC}"
-
-            # Staple the ticket
-            echo -e "${YELLOW}Stapling notarization ticket to DMG...${NC}"
-            xcrun stapler staple "$DMG_PATH"
-            echo -e "${GREEN}Stapling complete!${NC}"
-            break
-        elif [ "$STATUS" = "Invalid" ] || [ "$STATUS" = "Rejected" ]; then
-            echo -e "${RED}Notarization failed!${NC}"
-            echo "View details with:"
-            echo "  xcrun notarytool log \"$SUBMISSION_ID\" --keychain-profile \"notarytool-profile\""
-            exit 1
-        fi
-
-        echo -n "."
-        sleep 10
-        ELAPSED=$((ELAPSED + 10))
-    done
-
-    if [ $ELAPSED -ge $TIMEOUT ]; then
+    if [ -n "$SUBMISSION_ID" ]; then
         echo ""
-        echo -e "${YELLOW}Notarization is taking longer than expected.${NC}"
-        echo "Check status with:"
-        echo "  xcrun notarytool info \"$SUBMISSION_ID\" --keychain-profile \"notarytool-profile\""
-        echo "Once accepted, staple with:"
-        echo "  xcrun stapler staple \"$DMG_PATH\""
+        echo "Details:"
+        echo "  xcrun notarytool log \"$SUBMISSION_ID\" --keychain-profile \"notarytool-profile\""
     fi
+    exit 1
 fi
+
+echo -e "${GREEN}Notarization successful!${NC}"
+echo -e "${YELLOW}Stapling notarization ticket to DMG...${NC}"
+xcrun stapler staple "$DMG_PATH"
+echo -e "${GREEN}Stapling complete!${NC}"
 
 echo ""
 
@@ -415,7 +384,16 @@ ${APPCAST_FEATURES}        </ul>
 </rss>
 EOF
 
-echo -e "${GREEN}appcast.xml generated with release notes from CHANGELOG.md!${NC}"
+# Sign the feed itself (signature embedded in the XML). The app sets
+# SURequireSignedFeed, so an unsigned appcast would be rejected by clients.
+# Nothing may modify appcast.xml after this point.
+"$SIGN_UPDATE" appcast.xml
+if ! "$SIGN_UPDATE" --verify appcast.xml; then
+    echo -e "${RED}Error: appcast.xml signature did not verify${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}appcast.xml generated and signed with release notes from CHANGELOG.md!${NC}"
 echo ""
 
 # Publish order matters: the appcast points at the GitHub release asset, so the
