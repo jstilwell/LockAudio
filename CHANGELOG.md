@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- The menu bar icon now shows whether your locks are active, paused, or need attention (for example when the locked device is disconnected), and hovering over it lists each lock's state.
+- If another app keeps switching your device back, LockAudio stops the tug-of-war for a minute, tells you, and then tries again instead of fighting it endlessly.
+- A locked device that is disconnected stays listed in the menu as "(not connected)", so it's clear what the lock is waiting for.
+
+### Fixed
+
+- A stolen input or output is now switched back almost instantly, shortening the glitch when AirPods or another headset connects.
+- While your locked device is disconnected, a device you pick yourself is no longer switched back to the built-in speakers or mic. LockAudio still falls back to the built-in device at the moment of disconnect.
+- Notifications replace the previous one instead of piling up in Notification Center, and they now appear even while a LockAudio window is open.
+- Turning on a notification option when notifications are blocked for LockAudio now explains how to allow them.
+- Open at Login now explains what to do when it has been switched off in System Settings, and reports errors instead of failing silently.
+- Choosing a device that macOS won't accept as the default now shows an error instead of appearing to work.
+
+### Changed
+
+- Menu items use standard macOS wording, such as "Check for Updates…" and "Quit LockAudio", and Quit has the usual Command-Q shortcut.
+- Updates are verified more strictly: the update feed is now signed, and downloads are checked before they are unpacked.
+
 ## 2.0.3 - 09-01-2026
 
 
