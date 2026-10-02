@@ -49,7 +49,12 @@ done
 echo "Rendered app icon and status images into $ASSETS"
 
 if [ -n "$WEBSITE_DIR" ]; then
-    render "$SRC/appicon.svg" "$WEBSITE_DIR/static/appicon.png" 512
+    # The web icon is cropped to the tile: the macOS canvas's transparent
+    # margin (room for the Dock shadow) makes it look small on a page, and the
+    # site rounds the corners itself with CSS.
+    sed 's/viewBox="0 0 1024 1024" width="1024" height="1024"/viewBox="100 100 824 824" width="824" height="824"/' \
+        "$SRC/appicon.svg" > "$WORK/appicon-web.svg"
+    render "$WORK/appicon-web.svg" "$WEBSITE_DIR/static/appicon.png" 512
     cp "$SRC/status-active.svg" "$WEBSITE_DIR/static/menuicon.svg"
     echo "Updated $WEBSITE_DIR/static/appicon.png and menuicon.svg"
 fi
