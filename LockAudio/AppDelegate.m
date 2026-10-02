@@ -521,7 +521,8 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
             break;
     }
 
-    NSImage *image = [ [ NSImage imageNamed : name ] copy ] ?: [ [ NSImage imageNamed : @"airpods-icon" ] copy ];
+    // Copy: the named image is shared, and we set per-state properties on it.
+    NSImage *image = [ [ NSImage imageNamed : name ] copy ];
     image.template = YES;
     image.accessibilityDescription = description;
     return image;
@@ -961,10 +962,7 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
 
     // App icon
     CGFloat iconSize = 96;
-    NSImage *iconImage = [NSImage imageNamed:@"AppIcon"];
-    if (iconImage == nil) {
-        iconImage = [NSImage imageNamed:@"airpods-icon"];
-    }
+    NSImage *iconImage = [NSImage imageNamed:@"AppIcon"] ?: NSApp.applicationIconImage;
     NSImageView *iconView = [[NSImageView alloc] initWithFrame:NSMakeRect((W - iconSize) / 2, H - 28 - iconSize, iconSize, iconSize)];
     iconView.image = iconImage;
     iconView.imageScaling = NSImageScaleProportionallyUpOrDown;
