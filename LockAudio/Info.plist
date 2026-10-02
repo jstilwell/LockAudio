@@ -38,5 +38,9 @@
 	<string>https://updates.lockaudio.com/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>zZPI759UgnxBcP6jpkQaM2aTof3sLMsp7wTEKoYvnxQ=</string>
+	<key>SURequireSignedFeed</key>
+	<true/>
+	<key>SUVerifyUpdateBeforeExtraction</key>
+	<true/>
 </dict>
 </plist>
