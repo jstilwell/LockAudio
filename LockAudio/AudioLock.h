@@ -28,6 +28,16 @@ typedef NS_ENUM(NSUInteger, AudioLockDirection) {
     AudioLockDirectionOutput,
 };
 
+/// What a lock is doing right now, for the status item icon/tooltip and menu.
+typedef NS_ENUM(NSUInteger, AudioLockStatus) {
+    AudioLockStatusHidden,     // Section hidden in the menu; not enforcing.
+    AudioLockStatusUnset,      // Shown, but no device chosen yet (output default).
+    AudioLockStatusActive,     // Enforcing; the forced device is connected.
+    AudioLockStatusPaused,     // Shown, paused by the user.
+    AudioLockStatusMissing,    // The forced device isn't connected.
+    AudioLockStatusContested,  // Backing off: another app keeps changing it.
+};
+
 @interface AudioLock : NSObject
 
 /// The direction this lock controls.
@@ -54,15 +64,76 @@ typedef NS_ENUM(NSUInteger, AudioLockDirection) {
 /// (AppDelegate owns it, since it interacts with the show/hide toggles).
 @property (nonatomic) BOOL paused;
 
-/// Designated initializer. `defaultsKey` / `defaultsNameKey` / `defaultsUIDKey`
-/// are the NSUserDefaults keys used to persist the device id, display name, and
-/// stable UID respectively.
-- (instancetype)initWithDirection:(AudioLockDirection)direction
-                      defaultsKey:(NSString *)defaultsKey
-                  defaultsNameKey:(NSString *)defaultsNameKey
-                   defaultsUIDKey:(NSString *)defaultsUIDKey NS_DESIGNATED_INITIALIZER;
+/// YES while the forced device was found among the connected devices on the
+/// last `resolveForcedDeviceInDevices:count:`.
+@property (nonatomic) BOOL forcedDeviceAvailable;
+
+/// When the forced device was first seen missing (nil while it's connected).
+/// The built-in fallback only applies for a short grace period after this, so
+/// the user can pick another device while the locked one is away.
+@property (nonatomic, strong, nullable) NSDate *missingSince;
+
+/// Notifications for this direction are suppressed until this time (set after
+/// a user-initiated switch, whose echo shouldn't read as "forced").
+@property (nonatomic, strong, nullable) NSDate *suppressNotificationsUntil;
+
+/// Time of the last forced-device notification, for the minimum-gap throttle.
+@property (nonatomic, strong, nullable) NSDate *lastNotificationTime;
+
+/// Consecutive failed force attempts; bounds automatic retries.
+@property (nonatomic) NSUInteger consecutiveForceFailures;
+
+/// Designated initializer. All NSUserDefaults keys are derived from the
+/// direction (input keeps the original pre-2.0 key names).
+- (instancetype)initWithDirection:(AudioLockDirection)direction NS_DESIGNATED_INITIALIZER;
 
 - (instancetype)init NS_UNAVAILABLE;
+
+/// Registers default values for both directions' preferences.
++ (void)registerDefaults;
+
+/// "input" / "output", for logs and user-facing text.
+@property (nonatomic, readonly) NSString *directionName;
+
+/// "Input" / "Output", for titles.
+@property (nonatomic, readonly) NSString *capitalizedDirectionName;
+
+/// Persisted: whether this direction's section is shown in the menu.
+@property (nonatomic) BOOL showsOptions;
+
+/// Persisted: the user's pause *preference* for a visible section. The runtime
+/// `paused` is this OR hidden.
+@property (nonatomic) BOOL pausePreference;
+
+/// Persisted: whether to post a notification when the lock forces back.
+@property (nonatomic) BOOL notificationsEnabled;
+
+/// YES once a device has been chosen (or recovered from saved id/UID/name).
+@property (nonatomic, readonly) BOOL hasSelection;
+
+/// The current status, derived from the properties above and contention.
+@property (nonatomic, readonly) AudioLockStatus status;
+
+/// Records a force about to be applied and returns NO if it should be skipped
+/// because the lock is fighting another app (too many forces in a short
+/// window). In that case the lock backs off until `backoffUntil`.
+- (BOOL)recordForceAttempt;
+
+/// Non-nil while backing off after contention.
+@property (nonatomic, readonly, nullable) NSDate *backoffUntil;
+
+/// YES while `backoffUntil` is in the future.
+@property (nonatomic, readonly, getter=isBackingOff) BOOL backingOff;
+
+/// Clears contention state (on a user-initiated switch or pause toggle).
+- (void)resetContention;
+
+/// Resolves the forced device to a currently-connected AudioDeviceID that
+/// participates in this direction (by id, then UID, then name), updating
+/// `forcedID` / `forcedUID` / `forcedDeviceAvailable` and persisting any
+/// re-match. Returns `forcedDeviceAvailable`.
+- (BOOL)resolveForcedDeviceInDevices:(const AudioDeviceID *)devices
+                               count:(int)numberOfDevices;
 
 /// The CoreAudio selector for this direction's default device
 /// (kAudioHardwarePropertyDefaultInputDevice / …OutputDevice).
@@ -73,7 +144,7 @@ typedef NS_ENUM(NSUInteger, AudioLockDirection) {
 /// participates in this direction.
 @property (nonatomic, readonly) AudioObjectPropertyScope streamScope;
 
-/// Loads forcedID/forcedName from NSUserDefaults. Returns the raw saved id.
+/// Loads forcedID/forcedName/forcedUID from NSUserDefaults.
 - (void)loadFromDefaults;
 
 /// Persists the current forcedID (and forcedName when non-nil) to NSUserDefaults.

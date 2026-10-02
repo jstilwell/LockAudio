@@ -12,8 +12,6 @@
 		3333F8A9219874D600816A9F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 3333F8A8219874D600816A9F /* Assets.xcassets */; };
 		3333F8AC219874D600816A9F /* MainMenu.xib in Resources */ = {isa = PBXBuildFile; fileRef = 3333F8AA219874D600816A9F /* MainMenu.xib */; };
 		3333F8AF219874D600816A9F /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = 3333F8AE219874D600816A9F /* main.m */; };
-		335B967021988E6700F6D77B /* airpods-icon@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = 335B966E21988E6700F6D77B /* airpods-icon@2x.png */; };
-		335B967121988E6700F6D77B /* airpods-icon.png in Resources */ = {isa = PBXBuildFile; fileRef = 335B966F21988E6700F6D77B /* airpods-icon.png */; };
 		335B96772199C07000F6D77B /* LICENSE in Resources */ = {isa = PBXBuildFile; fileRef = 335B96742199C07000F6D77B /* LICENSE */; };
 		335B96782199C07000F6D77B /* GBLaunchAtLogin.m in Sources */ = {isa = PBXBuildFile; fileRef = 335B96752199C07000F6D77B /* GBLaunchAtLogin.m */; };
 		335B96792199C07000F6D77B /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = 335B96762199C07000F6D77B /* README.md */; };
@@ -31,8 +29,6 @@
 		3333F8AD219874D600816A9F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		3333F8AE219874D600816A9F /* main.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = main.m; sourceTree = "<group>"; };
 		3333F8BB2198771700816A9F /* CoreAudio.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreAudio.framework; path = System/Library/Frameworks/CoreAudio.framework; sourceTree = SDKROOT; };
-		335B966E21988E6700F6D77B /* airpods-icon@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "airpods-icon@2x.png"; sourceTree = "<group>"; };
-		335B966F21988E6700F6D77B /* airpods-icon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "airpods-icon.png"; sourceTree = "<group>"; };
 		335B96732199C07000F6D77B /* GBLaunchAtLogin.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = GBLaunchAtLogin.h; sourceTree = "<group>"; };
 		335B96742199C07000F6D77B /* LICENSE */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = LICENSE; sourceTree = "<group>"; };
 		335B96752199C07000F6D77B /* GBLaunchAtLogin.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = GBLaunchAtLogin.m; sourceTree = "<group>"; };
@@ -73,8 +69,6 @@
 		3333F8A4219874D300816A9F /* LockAudio */ = {
 			isa = PBXGroup;
 			children = (
-				335B966F21988E6700F6D77B /* airpods-icon.png */,
-				335B966E21988E6700F6D77B /* airpods-icon@2x.png */,
 				3333F8A5219874D300816A9F /* AppDelegate.h */,
 				3333F8A6219874D300816A9F /* AppDelegate.m */,
 				C23DF0C101AF4273A91B5CC8 /* AudioLock.h */,
@@ -176,10 +170,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				335B96792199C07000F6D77B /* README.md in Resources */,
-				335B967021988E6700F6D77B /* airpods-icon@2x.png in Resources */,
 				3333F8A9219874D600816A9F /* Assets.xcassets in Resources */,
 				3333F8AC219874D600816A9F /* MainMenu.xib in Resources */,
-				335B967121988E6700F6D77B /* airpods-icon.png in Resources */,
 				335B96772199C07000F6D77B /* LICENSE in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -17,18 +17,20 @@
     return [SMAppService mainAppService].status == SMAppServiceStatusEnabled;
 }
 
-+(void)addAppAsLoginItem {
-    NSError *error = nil;
-    if (![[SMAppService mainAppService] registerAndReturnError:&error]) {
-        NSLog(@"Failed to register login item: %@", error);
-    }
++(BOOL)loginItemRequiresApproval {
+    return [SMAppService mainAppService].status == SMAppServiceStatusRequiresApproval;
 }
 
-+(void)removeAppFromLoginItems {
-    NSError *error = nil;
-    if (![[SMAppService mainAppService] unregisterAndReturnError:&error]) {
-        NSLog(@"Failed to unregister login item: %@", error);
-    }
++(BOOL)addAppAsLoginItem:(NSError **)error {
+    return [[SMAppService mainAppService] registerAndReturnError:error];
+}
+
++(BOOL)removeAppFromLoginItems:(NSError **)error {
+    return [[SMAppService mainAppService] unregisterAndReturnError:error];
+}
+
++(void)openLoginItemsSettings {
+    [SMAppService openSystemSettingsLoginItems];
 }
 
 @end
