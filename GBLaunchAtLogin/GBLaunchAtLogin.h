@@ -11,7 +11,12 @@
 @interface GBLaunchAtLogin : NSObject
 
 +(BOOL)isLoginItem;
-+(void)addAppAsLoginItem;
-+(void)removeAppFromLoginItems;
+/// YES when the app is registered but the user switched it off in System
+/// Settings → General → Login Items, so it won't launch until they re-enable it.
++(BOOL)loginItemRequiresApproval;
++(BOOL)addAppAsLoginItem:(NSError **)error;
++(BOOL)removeAppFromLoginItems:(NSError **)error;
+/// Opens System Settings → General → Login Items.
++(void)openLoginItemsSettings;
 
 @end

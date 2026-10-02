@@ -14,33 +14,8 @@
 }
 @end
 
-// Notify-on-forced toggles, one per direction. The input key keeps its original
-// name ("NotificationsEnabled") for backward compatibility with existing installs.
-static NSString* const kPrefNotificationsEnabled = @"NotificationsEnabled";
-static NSString* const kPrefOutputNotificationsEnabled = @"OutputNotificationsEnabled";
-
-// NSUserDefaults keys for the forced device id/name, per direction. The input
-// keys keep their original names ("Device"/"DeviceName") for backward compat.
-static NSString* const kPrefInputDevice = @"Device";
-static NSString* const kPrefInputDeviceName = @"DeviceName";
-static NSString* const kPrefInputDeviceUID = @"DeviceUID";
-static NSString* const kPrefOutputDevice = @"OutputDevice";
-static NSString* const kPrefOutputDeviceName = @"OutputDeviceName";
-static NSString* const kPrefOutputDeviceUID = @"OutputDeviceUID";
-
-// Per-direction "show these options in the menu" toggles. When a direction is
-// hidden its whole menu section is removed and its lock is paused; showing it
-// again restores the lock's prior pause state. Input defaults ON (the common
-// case); output defaults OFF (rare case — users opt in).
-static NSString* const kPrefShowInputOptions = @"ShowInputOptions";
-static NSString* const kPrefShowOutputOptions = @"ShowOutputOptions";
-
-// Per-direction pause *preference*, persisted across launches. This is the
-// user's intended pause state for a visible section; while a section is hidden
-// its lock is force-paused at runtime but this preference is preserved so it
-// returns to the right state when shown again.
-static NSString* const kPrefInputPaused = @"InputPaused";
-static NSString* const kPrefOutputPaused = @"OutputPaused";
+// Per-direction preference keys (device, show/hide, pause, notify) live in
+// AudioLock. These are the app-wide ones.
 
 // Persisted launch-at-login state. The app's actual login-item registration
 // lives in SMAppService (queried live by GBLaunchAtLogin), but we also mirror
@@ -48,50 +23,53 @@ static NSString* const kPrefOutputPaused = @"OutputPaused";
 // change — the way the device preference is.
 static NSString* const kPrefLaunchAtLogin = @"LaunchAtLogin";
 
-// Bundle identifier of the app before the LockAudio rename. Used once, on first
-// launch under the new identifier, to migrate the user's saved settings.
+// Bundle identifier of the app before the LockAudio rename, and the keys it
+// used. Used once, on first launch under the new identifier, to migrate the
+// user's saved settings.
 static NSString* const kLegacyBundleIdentifier = @"com.audio.locker";
+static NSString* const kLegacyPrefDevice = @"Device";
+static NSString* const kLegacyPrefDeviceName = @"DeviceName";
+static NSString* const kLegacyPrefNotificationsEnabled = @"NotificationsEnabled";
 
 // Minimum gap between forced-device notifications (per direction). Under this
 // threshold we treat successive fires as CoreAudio churn (e.g. AirPods settling)
 // and suppress; legitimate user-driven switches always exceed this easily.
 static const NSTimeInterval kMinNotificationGap = 2.0;
 
-// How long to wait for a burst of CoreAudio notifications to settle before
-// rebuilding. A single device connect fires the device-list listener and both
-// default-device listeners in quick succession; each rebuild costs several
-// CoreAudio round-trips per device, so collapse the burst into one rebuild.
-static const NSTimeInterval kRebuildCoalesceDelay = 0.15;
+// After a user picks a device, its own echo through the listeners shouldn't
+// read as "forced back", so notifications stay quiet this long.
+static const NSTimeInterval kUserSwitchQuietPeriod = 1.0;
+
+// When the forced device disconnects, fall back to the built-in device for this
+// long — long enough to win against macOS's own reassignment, which can land
+// after ours — then respect whatever the user picks until it reconnects.
+static const NSTimeInterval kFallbackGraceInterval = 3.0;
+
+// A failed force (e.g. a device still settling after connect) is retried a few
+// times; after that we wait for the next device change.
+static const NSTimeInterval kForceRetryDelay = 0.5;
+static const NSUInteger kMaxForceRetries = 3;
+
+// Overall state shown by the menu bar icon.
+typedef NS_ENUM(NSUInteger, StatusIconState) {
+    StatusIconStateActive,
+    StatusIconStatePaused,
+    StatusIconStateAttention,
+};
 
 
 
-@interface AppDelegate ( )
+@interface AppDelegate ( ) <UNUserNotificationCenterDelegate>
 {
     NSMenu* menu;
     NSStatusItem* statusItem;
     AudioLock* inputLock;
     AudioLock* outputLock;
-    NSMenuItem *startupItem;
-    NSMenuItem *notificationsItem;
-    NSMenuItem *outputNotificationsItem;
-    NSMenuItem *showInputItem;
-    NSMenuItem *showOutputItem;
-    BOOL rebuildingMenu;
-    // Suppress the next forced-device notification for a direction after a
-    // user-initiated switch (the callback can briefly see the old default and
-    // re-force, which would otherwise fire a misleading notification).
-    BOOL suppressNextInputNotification;
-    BOOL suppressNextOutputNotification;
-    NSDate* lastInputNotificationTime;
-    NSDate* lastOutputNotificationTime;
-    BOOL notificationAuthGranted;
+    BOOL menuOpen;
     BOOL screenLocked;
     NSWindow* aboutWindow;
     // Shared listener block for all three CoreAudio property listeners.
     AudioObjectPropertyListenerBlock deviceChangeListener;
-    // Bumped on every scheduled rebuild and on every actual rebuild; a pending
-    // coalesced rebuild only runs if nothing newer superseded it.
-    NSUInteger rebuildGeneration;
 }
 
 @property (strong) SPUStandardUpdaterController *updaterController;
@@ -102,21 +80,10 @@ static const NSTimeInterval kRebuildCoalesceDelay = 0.15;
 @implementation AppDelegate
 
 
-// Coalesces CoreAudio notifications into a single menu rebuild / re-force.
-// Always called on the main queue (the listeners are registered on it).
-- ( void ) scheduleRebuild
+- ( NSArray<AudioLock*>* ) locks
 {
-    NSUInteger generation = ++rebuildGeneration;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kRebuildCoalesceDelay * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{
-        if ( generation != self->rebuildGeneration )
-        {
-            return; // superseded by a later notification or an explicit rebuild
-        }
-        [self listDevices];
-    });
+    return @[ inputLock, outputLock ];
 }
-
 
 
 // Copies the user's settings from the pre-rename app (com.audio.locker) into
@@ -130,7 +97,7 @@ static const NSTimeInterval kRebuildCoalesceDelay = 0.15;
 
     // If we already have a saved device, the user has used (or migrated into)
     // this app before — don't touch anything.
-    if ( [prefs objectForKey:@"Device"] != nil )
+    if ( [prefs objectForKey:kLegacyPrefDevice] != nil )
     {
         return;
     }
@@ -138,7 +105,7 @@ static const NSTimeInterval kRebuildCoalesceDelay = 0.15;
     CFStringRef legacyID = (__bridge CFStringRef)kLegacyBundleIdentifier;
 
     id legacyDevice = (__bridge_transfer id)CFPreferencesCopyAppValue(
-        CFSTR("Device"), legacyID);
+        (__bridge CFStringRef)kLegacyPrefDevice, legacyID);
 
     // No legacy device means this is a genuine fresh install, not an upgrade.
     if ( legacyDevice == nil )
@@ -152,21 +119,21 @@ static const NSTimeInterval kRebuildCoalesceDelay = 0.15;
         return;
     }
 
-    [prefs setInteger:[legacyDevice integerValue] forKey:@"Device"];
+    [prefs setInteger:[legacyDevice integerValue] forKey:kLegacyPrefDevice];
 
 
     id legacyDeviceName = (__bridge_transfer id)CFPreferencesCopyAppValue(
-        CFSTR("DeviceName"), legacyID);
+        (__bridge CFStringRef)kLegacyPrefDeviceName, legacyID);
     if ( [legacyDeviceName isKindOfClass:[NSString class]] )
     {
-        [prefs setObject:legacyDeviceName forKey:@"DeviceName"];
+        [prefs setObject:legacyDeviceName forKey:kLegacyPrefDeviceName];
     }
 
     id legacyNotifications = (__bridge_transfer id)CFPreferencesCopyAppValue(
-        (__bridge CFStringRef)kPrefNotificationsEnabled, legacyID);
+        (__bridge CFStringRef)kLegacyPrefNotificationsEnabled, legacyID);
     if ( legacyNotifications != nil )
     {
-        [prefs setBool:[legacyNotifications boolValue] forKey:kPrefNotificationsEnabled];
+        [prefs setBool:[legacyNotifications boolValue] forKey:kLegacyPrefNotificationsEnabled];
     }
 
     // Launch-at-login: the legacy app never persisted this preference (it read
@@ -178,8 +145,15 @@ static const NSTimeInterval kRebuildCoalesceDelay = 0.15;
         (__bridge CFStringRef)kPrefLaunchAtLogin, legacyID);
     if ( [legacyLaunchAtLogin boolValue] && ![GBLaunchAtLogin isLoginItem] )
     {
-        [GBLaunchAtLogin addAppAsLoginItem];
-        [prefs setBool:YES forKey:kPrefLaunchAtLogin];
+        NSError *error = nil;
+        if ( [GBLaunchAtLogin addAppAsLoginItem:&error] )
+        {
+            [prefs setBool:YES forKey:kPrefLaunchAtLogin];
+        }
+        else
+        {
+            LAError("Migrating launch-at-login failed: %{public}@", error);
+        }
     }
 
     LADebug("Migrated settings from legacy bundle %{public}@: Device=%ld name=%{public}@",
@@ -192,9 +166,6 @@ static const NSTimeInterval kRebuildCoalesceDelay = 0.15;
     // Initialize Sparkle updater
     self.updaterController = [[SPUStandardUpdaterController alloc] initWithStartingUpdater:YES updaterDelegate:nil userDriverDelegate:nil];
 
-    lastInputNotificationTime = nil;
-    lastOutputNotificationTime = nil;
-    notificationAuthGranted = NO;
     screenLocked = NO;
 
     NSDistributedNotificationCenter *dnc = [NSDistributedNotificationCenter defaultCenter];
@@ -214,61 +185,47 @@ static const NSTimeInterval kRebuildCoalesceDelay = 0.15;
     // domain's values the first time we launch under the new identifier.
     [self migrateSettingsFromLegacyBundleIfNeeded];
 
-    NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
-    [prefs registerDefaults:@{
-        kPrefNotificationsEnabled: @YES,
-        // Output locking is opt-in: notifications default off and no output
-        // device is forced until the user chooses one.
-        kPrefOutputNotificationsEnabled: @NO,
-        // Input options shown by default (common case); output options hidden by
-        // default (rare case — users opt in via "Show Output Options").
-        kPrefShowInputOptions: @YES,
-        kPrefShowOutputOptions: @NO,
-        // Neither lock paused by default.
-        kPrefInputPaused: @NO,
-        kPrefOutputPaused: @NO,
-    }];
+    [AudioLock registerDefaults];
 
-    inputLock = [[AudioLock alloc] initWithDirection:AudioLockDirectionInput
-                                         defaultsKey:kPrefInputDevice
-                                     defaultsNameKey:kPrefInputDeviceName
-                                      defaultsUIDKey:kPrefInputDeviceUID];
-    [inputLock loadFromDefaults];
-
-    outputLock = [[AudioLock alloc] initWithDirection:AudioLockDirectionOutput
-                                          defaultsKey:kPrefOutputDevice
-                                      defaultsNameKey:kPrefOutputDeviceName
-                                       defaultsUIDKey:kPrefOutputDeviceUID];
-    [outputLock loadFromDefaults];
+    inputLock = [[AudioLock alloc] initWithDirection:AudioLockDirectionInput];
+    outputLock = [[AudioLock alloc] initWithDirection:AudioLockDirectionOutput];
 
     // Runtime pause state = persisted pause preference OR section hidden. A
     // hidden direction is always paused (so it doesn't force while hidden); a
     // visible one reflects the user's saved pause choice. Both survive relaunch.
-    inputLock.paused = [prefs boolForKey:kPrefInputPaused]
-                       || ![prefs boolForKey:kPrefShowInputOptions];
-    outputLock.paused = [prefs boolForKey:kPrefOutputPaused]
-                        || ![prefs boolForKey:kPrefShowOutputOptions];
+    for ( AudioLock *lock in self.locks )
+    {
+        [lock loadFromDefaults];
+        lock.paused = lock.pausePreference || !lock.showsOptions;
+    }
 
+    // Show our notifications as banners even while the About window is up.
+    [UNUserNotificationCenter currentNotificationCenter].delegate = self;
     [self requestNotificationAuthorizationIfNeeded];
 
     LADebug("Loaded input lock: %d (%{public}@), output lock: %d (%{public}@)",
           inputLock.forcedID, inputLock.forcedName,
           outputLock.forcedID, outputLock.forcedName);
 
-    NSImage* image = [ NSImage imageNamed : @"airpods-icon" ];
-    [ image setTemplate : YES ];
-
     statusItem = [ [ NSStatusBar systemStatusBar ] statusItemWithLength : NSVariableStatusItemLength ];
-    statusItem.button.toolTip = @"LockAudio";
-    statusItem.button.image = image;
+
+    // The menu is populated lazily in menuNeedsUpdate: (and refreshed in place
+    // while open), so device changes only pay for enforcement, not menu
+    // building.
+    menu = [ [ NSMenu alloc ] init ];
+    menu.delegate = self;
+    statusItem.menu = menu;
 
     // Listen for changes to the default input and output devices, and for the
     // device list itself changing (devices added/removed). CoreAudio delivers
-    // these on the main queue; scheduleRebuild coalesces the burst.
+    // these on the main queue. Enforcement is cheap, so it runs on every
+    // notification with no coalescing delay: the sooner a stolen default is
+    // put back, the shorter the audible glitch (e.g. AirPods dropping into
+    // call-quality mode).
     __weak AppDelegate *weakSelf = self;
     deviceChangeListener = ^( UInt32 inNumberAddresses, const AudioObjectPropertyAddress *inAddresses ) {
         LADebug("audio device change notification" );
-        [weakSelf scheduleRebuild];
+        [weakSelf enforceLocks];
     };
 
     AudioObjectPropertyAddress inputDeviceAddress = [inputLock defaultDeviceListenerAddress];
@@ -296,9 +253,478 @@ static const NSTimeInterval kRebuildCoalesceDelay = 0.15;
         dispatch_get_main_queue(),
         deviceChangeListener );
 
-    [ self listDevices ];
+    [ self enforceLocks ];
+}
 
 
+#pragma mark - Enforcement
+
+// Re-resolves every shown lock's forced device and puts the default back where
+// it belongs, then refreshes the status icon (and the menu, if it's open).
+// Called from the CoreAudio listeners, on launch, and after any user action
+// that changes a lock.
+- ( void ) enforceLocks
+{
+    NSData *deviceData = [AudioLock connectedDeviceIDs];
+    if ( deviceData == nil )
+    {
+        // CoreAudio unreachable (e.g. coreaudiod restarting). Acting on an empty
+        // list would mark every forced device missing; wait for the next
+        // notification instead.
+        return;
+    }
+    const AudioDeviceID *devices = deviceData.bytes;
+    int numberOfDevices = (int)( deviceData.length / sizeof( AudioDeviceID ) );
+    LADebug("devices found : %i" , numberOfDevices );
+
+    for ( AudioLock *lock in self.locks )
+    {
+        [ lock invalidateDeviceCache ];
+        if ( lock.showsOptions )
+        {
+            [ self enforceLock : lock devices : devices count : numberOfDevices ];
+        }
+    }
+
+    [ self updateStatusItem ];
+
+    if ( menuOpen )
+    {
+        [ self populateMenu : menu ];
+    }
+}
+
+
+- ( void ) enforceLock : ( AudioLock* ) lock
+               devices : ( const AudioDeviceID* ) devices
+                 count : ( int ) numberOfDevices
+{
+    NSString *dirName = lock.directionName;
+
+    // Resolve the forced device to a currently-connected AudioDeviceID. Prefers
+    // the stable UID, falls back to the display name. This is what makes a
+    // forced device survive disconnect/reconnect even though its AudioDeviceID
+    // — and, for some devices like AirPods, its display name — can change.
+    BOOL available = [ lock resolveForcedDeviceInDevices : devices count : numberOfDevices ];
+
+    // Default the INPUT lock to the built-in microphone when nothing has ever
+    // been saved. Output locking is opt-in, so it has no default device. The
+    // built-in device is identified by CoreAudio transport type rather than by
+    // name: Intel Macs call it "Built-in Microphone" but Apple Silicon Macs use
+    // "MacBook Pro Microphone" / "Mac Studio Speakers", so a name heuristic
+    // silently matched nothing on modern hardware.
+    if ( lock.direction == AudioLockDirectionInput && !lock.hasSelection )
+    {
+        AudioDeviceID builtInID = [ lock builtInDeviceInDevices : devices count : numberOfDevices ];
+        NSString *builtInName = ( builtInID != kAudioDeviceUnknown ) ? [ lock nameForDevice : builtInID ] : nil;
+
+        if ( builtInName != nil )
+        {
+            LADebug("setting default forced %{public}@ : %{public}@  %u", dirName, builtInName, (unsigned int)builtInID );
+
+            lock.forcedID = builtInID;
+            lock.forcedName = builtInName;
+            lock.forcedUID = [ lock uidForDevice : builtInID ];
+            lock.forcedDeviceAvailable = YES;
+            available = YES;
+            [ lock saveToDefaults ];
+        }
+    }
+
+    if ( available )
+    {
+        lock.missingSince = nil;
+    }
+    else if ( lock.hasSelection && lock.missingSince == nil )
+    {
+        LADebug("forced %{public}@ device '%{public}@' not connected; keeping saved selection for recovery", dirName, lock.forcedName );
+        lock.missingSince = [ NSDate date ];
+    }
+
+    if ( lock.paused || lock.backingOff )
+    {
+        return;
+    }
+
+    AudioDeviceID currentID = [ lock currentDefaultDevice ];
+    LADebug("default %{public}@ device is %u" , dirName, currentID );
+
+    if ( available )
+    {
+        if ( currentID == lock.forcedID )
+        {
+            lock.consecutiveForceFailures = 0;
+            return;
+        }
+
+        if ( ![ lock recordForceAttempt ] )
+        {
+            [ self handleContentionForLock : lock currentDevice : currentID ];
+            return;
+        }
+
+        LADebug("forcing %{public}@ device for default : %u" , dirName, lock.forcedID );
+        NSString *offendingName = [ lock nameForDevice : currentID ];
+        OSStatus forceStatus = [ lock applyForce : lock.forcedID ];
+
+        if ( forceStatus == noErr )
+        {
+            lock.consecutiveForceFailures = 0;
+            [ self postForcedNotificationForLock : lock offendingName : offendingName ];
+        }
+        else
+        {
+            LAError("force %{public}@ failed: OSStatus %d", dirName, (int)forceStatus );
+            [ self scheduleRetryAfterForceFailureForLock : lock ];
+        }
+        // The property listener will fire for the change we just made and
+        // re-run enforcement, which then finds nothing to do.
+    }
+    else if ( lock.missingSince != nil
+              && -lock.missingSince.timeIntervalSinceNow <= kFallbackGraceInterval )
+    {
+        // The forced device just disconnected. Don't leave the default to
+        // macOS, which can land on an arbitrary device (e.g. a RØDE that's both
+        // an input and output) instead of the built-in. Fall back to the
+        // built-in device — but only for a short grace period after the
+        // disconnect, so a device the user deliberately picks while the locked
+        // one is away isn't overridden. The saved selection is untouched, so the
+        // lock recovers the forced device the moment it reconnects.
+        AudioDeviceID builtInID = [ lock builtInDeviceInDevices : devices count : numberOfDevices ];
+
+        if ( builtInID != kAudioDeviceUnknown && currentID != builtInID )
+        {
+            LADebug("forced %{public}@ device '%{public}@' not connected; falling back to built-in %u",
+                   dirName, lock.forcedName, (unsigned int)builtInID );
+
+            OSStatus forceStatus = [ lock applyForce : builtInID ];
+            if ( forceStatus != noErr )
+            {
+                LAError("fallback %{public}@ force failed: OSStatus %d", dirName, (int)forceStatus );
+            }
+            // No notification: a disconnect-driven fallback to built-in isn't the
+            // same event as another device stealing the lock, and notifying on
+            // every disconnect would be noisy.
+        }
+    }
+}
+
+
+- ( void ) scheduleRetryAfterForceFailureForLock : ( AudioLock* ) lock
+{
+    if ( lock.consecutiveForceFailures >= kMaxForceRetries )
+    {
+        LAError("giving up on forcing %{public}@ until the next device change", lock.directionName );
+        return;
+    }
+    lock.consecutiveForceFailures++;
+
+    __weak AppDelegate *weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kForceRetryDelay * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        [weakSelf enforceLocks];
+    });
+}
+
+
+// Another app keeps setting the default right back. Stop the tug-of-war for a
+// while (the lock is backing off), tell the user, and try again afterwards.
+- ( void ) handleContentionForLock : ( AudioLock* ) lock
+                     currentDevice : ( AudioDeviceID ) currentID
+{
+    NSString *dirName = lock.directionName;
+    NSString *otherName = [ lock nameForDevice : currentID ] ?: @"another device";
+    LAError("%{public}@ lock contested (default keeps moving to %{public}@); backing off", dirName, otherName );
+
+    [ self postNotificationForLock : lock
+                              kind : @"contested"
+                             title : [ NSString stringWithFormat : @"%@ lock paused for a minute", lock.capitalizedDirectionName ]
+                              body : [ NSString stringWithFormat :
+                                       @"Something keeps switching your %@ to %@, so LockAudio stopped switching it back. It will try again in a minute. To stop this, quit the other app or pause the lock.",
+                                       dirName, otherName ] ];
+
+    NSTimeInterval delay = MAX( lock.backoffUntil.timeIntervalSinceNow, 0 ) + 0.1;
+    __weak AppDelegate *weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        [weakSelf enforceLocks];
+    });
+}
+
+
+#pragma mark - Status item
+
+- ( void ) updateStatusItem
+{
+    BOOL anyActive = NO;
+    BOOL anyPaused = NO;
+    BOOL anyAttention = NO;
+    NSMutableArray<NSString*> *lines = [ NSMutableArray arrayWithObject : @"LockAudio" ];
+
+    for ( AudioLock *lock in self.locks )
+    {
+        NSString *dir = lock.capitalizedDirectionName;
+        switch ( lock.status )
+        {
+            case AudioLockStatusHidden:
+                break;
+            case AudioLockStatusUnset:
+                [ lines addObject : [ NSString stringWithFormat : @"%@: no device chosen", dir ] ];
+                break;
+            case AudioLockStatusActive:
+                anyActive = YES;
+                [ lines addObject : [ NSString stringWithFormat : @"%@ locked to %@", dir, lock.forcedName ?: @"selected device" ] ];
+                break;
+            case AudioLockStatusPaused:
+                anyPaused = YES;
+                [ lines addObject : [ NSString stringWithFormat : @"%@ lock paused", dir ] ];
+                break;
+            case AudioLockStatusMissing:
+                anyAttention = YES;
+                [ lines addObject : [ NSString stringWithFormat : @"%@: %@ not connected", dir, lock.forcedName ?: @"locked device" ] ];
+                break;
+            case AudioLockStatusContested:
+                anyAttention = YES;
+                [ lines addObject : [ NSString stringWithFormat : @"%@: another app keeps changing it; retrying soon", dir ] ];
+                break;
+        }
+    }
+
+    // Attention wins (the lock isn't holding), then paused, then active. With
+    // nothing shown or chosen nothing is enforced, which reads as paused.
+    StatusIconState state = anyAttention ? StatusIconStateAttention
+                          : ( anyPaused || !anyActive ) ? StatusIconStatePaused
+                          : StatusIconStateActive;
+
+    statusItem.button.image = [ self statusImageForState : state ];
+    statusItem.button.toolTip = [ lines componentsJoinedByString : @"\n" ];
+}
+
+
+- ( NSImage* ) statusImageForState : ( StatusIconState ) state
+{
+    NSString *name;
+    NSString *description;
+    switch ( state )
+    {
+        case StatusIconStateActive:
+            name = @"status-active";
+            description = @"LockAudio, locked";
+            break;
+        case StatusIconStatePaused:
+            name = @"status-paused";
+            description = @"LockAudio, paused";
+            break;
+        case StatusIconStateAttention:
+            name = @"status-attention";
+            description = @"LockAudio, needs attention";
+            break;
+    }
+
+    NSImage *image = [ [ NSImage imageNamed : name ] copy ] ?: [ [ NSImage imageNamed : @"airpods-icon" ] copy ];
+    image.template = YES;
+    image.accessibilityDescription = description;
+    return image;
+}
+
+
+#pragma mark - Menu
+
+- ( void ) menuNeedsUpdate : ( NSMenu* ) aMenu
+{
+    [ self populateMenu : aMenu ];
+}
+
+- ( void ) menuWillOpen : ( NSMenu* ) aMenu
+{
+    menuOpen = YES;
+}
+
+- ( void ) menuDidClose : ( NSMenu* ) aMenu
+{
+    menuOpen = NO;
+}
+
+
+- ( NSMenuItem* ) addItemTo : ( NSMenu* ) target
+                      title : ( NSString* ) title
+                     action : ( SEL ) action
+                     symbol : ( NSString* ) symbol
+{
+    NSMenuItem *item = [ target addItemWithTitle : title action : action keyEquivalent : @"" ];
+    item.target = self;
+    // App-control items carry SF Symbol icons; selectable device rows stay
+    // icon-less (just a checkmark), so the icon vs no-icon contrast
+    // distinguishes actions from device choices.
+    if ( symbol != nil )
+    {
+        item.image = [ NSImage imageWithSystemSymbolName : symbol accessibilityDescription : nil ];
+    }
+    return item;
+}
+
+
+- ( NSMenuItem* ) sectionHeaderWithTitle : ( NSString* ) title
+{
+    if ( @available( macOS 14.0, * ) )
+    {
+        return [ NSMenuItem sectionHeaderWithTitle : title ];
+    }
+    return [ [ NSMenuItem alloc ] initWithTitle : title action : nil keyEquivalent : @"" ];
+}
+
+
+- ( void ) populateMenu : ( NSMenu* ) target
+{
+    [ target removeAllItems ];
+
+    // Enumerate devices once and share the list between both sections; each
+    // lock memoizes its per-device stream check for the duration of the build.
+    NSData *deviceData = [ AudioLock connectedDeviceIDs ];
+    const AudioDeviceID *devices = deviceData.bytes;
+    int numberOfDevices = (int)( deviceData.length / sizeof( AudioDeviceID ) );
+
+    NSString *version = [ [ NSBundle mainBundle ] infoDictionary ][ @"CFBundleShortVersionString" ];
+    [ target addItemWithTitle : [ NSString stringWithFormat : @"Version %@", version ] action : nil keyEquivalent : @"" ];
+    [ target addItem : [ NSMenuItem separatorItem ] ];
+
+    for ( AudioLock *lock in self.locks )
+    {
+        [ lock invalidateDeviceCache ];
+        if ( lock.showsOptions )
+        {
+            [ self appendSectionForLock : lock toMenu : target devices : devices count : numberOfDevices ];
+        }
+    }
+
+    NSMenuItem *startupItem = [ self addItemTo : target title : @"Open at Login" action : @selector(toggleStartupItem) symbol : @"power" ];
+    // Mixed (a dash) when registered but switched off in System Settings.
+    startupItem.state = [ GBLaunchAtLogin isLoginItem ] ? NSControlStateValueOn
+                      : [ GBLaunchAtLogin loginItemRequiresApproval ] ? NSControlStateValueMixed
+                      : NSControlStateValueOff;
+
+    for ( AudioLock *lock in self.locks )
+    {
+        NSString *title = [ NSString stringWithFormat : @"Show %@ Options", lock.capitalizedDirectionName ];
+        NSString *symbol = ( lock.direction == AudioLockDirectionInput ) ? @"mic" : @"speaker.wave.2";
+        NSMenuItem *item = [ self addItemTo : target title : title action : @selector(toggleShowOptions:) symbol : symbol ];
+        item.representedObject = @( lock.direction );
+        item.state = lock.showsOptions ? NSControlStateValueOn : NSControlStateValueOff;
+    }
+
+    // Notify toggles only appear when their section is shown.
+    for ( AudioLock *lock in self.locks )
+    {
+        if ( !lock.showsOptions )
+        {
+            continue;
+        }
+        NSString *title = [ NSString stringWithFormat : @"Notify on Forced %@", lock.capitalizedDirectionName ];
+        NSMenuItem *item = [ self addItemTo : target title : title action : @selector(toggleNotifications:) symbol : @"bell" ];
+        item.representedObject = @( lock.direction );
+        item.state = lock.notificationsEnabled ? NSControlStateValueOn : NSControlStateValueOff;
+    }
+
+    [ target addItem : [ NSMenuItem separatorItem ] ];
+
+    [ self addItemTo : target title : @"Sound Settings…" action : @selector(openSoundSettings) symbol : @"gearshape" ];
+
+    // Targeting Sparkle's controller lets it disable the item while a check
+    // is already running.
+    NSMenuItem *updateItem = [ self addItemTo : target title : @"Check for Updates…" action : @selector(checkForUpdates:) symbol : @"arrow.triangle.2.circlepath" ];
+    updateItem.target = self.updaterController;
+
+    [ self addItemTo : target title : @"About LockAudio" action : @selector(showAbout) symbol : @"info.circle" ];
+
+    NSMenuItem *quitItem = [ self addItemTo : target title : @"Quit LockAudio" action : @selector(terminate:) symbol : @"xmark.circle" ];
+    quitItem.target = NSApp;
+    quitItem.keyEquivalent = @"q";
+}
+
+
+// Appends one direction's section: header, one row per participating device
+// (checkmark on the forced one), status rows, and the pause toggle.
+- ( void ) appendSectionForLock : ( AudioLock* ) lock
+                         toMenu : ( NSMenu* ) targetMenu
+                        devices : ( const AudioDeviceID* ) devices
+                          count : ( int ) numberOfDevices
+{
+    NSString *dirName = lock.directionName;
+    [ targetMenu addItem : [ self sectionHeaderWithTitle : [ NSString stringWithFormat : @"Forced %@", lock.capitalizedDirectionName ] ] ];
+
+    BOOL listedForced = NO;
+
+    for ( int index = 0; index < numberOfDevices; index++ )
+    {
+        AudioDeviceID oneDeviceID = devices[ index ];
+
+        // Only list devices that participate in this lock's direction.
+        if ( ![ lock deviceParticipates : oneDeviceID ] )
+        {
+            continue;
+        }
+
+        BOOL isForced = lock.forcedDeviceAvailable && oneDeviceID == lock.forcedID;
+
+        NSString* nameStr = [ lock nameForDevice : oneDeviceID ];
+        if ( nameStr == nil )
+        {
+            // Name unreadable. If this is the currently-forced device (e.g.
+            // recovered by UID through a transient name-read failure), show a
+            // *disabled* row under its saved name so the user still sees what's
+            // locked and the checkmark stays put — but it isn't selectable, so a
+            // placeholder can never be written back into forcedName. Any other
+            // unreadable device is simply omitted (it was never useful to list).
+            if ( isForced && lock.forcedName != nil )
+            {
+                NSMenuItem* forcedItem = [ targetMenu addItemWithTitle : lock.forcedName action : NULL keyEquivalent : @"" ];
+                forcedItem.state = NSControlStateValueOn;
+                listedForced = YES;
+                LADebug("%{public}@ forced device name unreadable; showing saved name '%{public}@' (%u)",
+                       dirName, lock.forcedName, (unsigned int)oneDeviceID );
+            }
+            continue;
+        }
+
+        NSMenuItem* item = [ targetMenu addItemWithTitle : nameStr action : @selector(deviceSelected:) keyEquivalent : @"" ];
+        item.target = self;
+        item.representedObject = @[ @(lock.direction), @((unsigned int)oneDeviceID) ];
+
+        if ( isForced )
+        {
+            item.state = NSControlStateValueOn;
+            listedForced = YES;
+        }
+    }
+
+    // Keep the locked device visible while it's disconnected, so it's clear
+    // what the lock is waiting for.
+    if ( !listedForced && lock.hasSelection && !lock.forcedDeviceAvailable && lock.forcedName != nil )
+    {
+        NSString *title = [ NSString stringWithFormat : @"%@ (not connected)", lock.forcedName ];
+        NSMenuItem *missingItem = [ targetMenu addItemWithTitle : title action : NULL keyEquivalent : @"" ];
+        missingItem.state = NSControlStateValueOn;
+    }
+
+    if ( lock.status == AudioLockStatusContested )
+    {
+        [ targetMenu addItemWithTitle : @"Another app keeps changing it; retrying soon" action : NULL keyEquivalent : @"" ];
+    }
+
+    NSString *pauseTitle = [ NSString stringWithFormat : @"Pause %@ Lock", lock.capitalizedDirectionName ];
+    NSMenuItem *pauseItem = [ self addItemTo : targetMenu title : pauseTitle action : @selector(togglePause:) symbol : @"pause.circle" ];
+    pauseItem.representedObject = @( lock.direction );
+    pauseItem.state = lock.paused ? NSControlStateValueOn : NSControlStateValueOff;
+
+    [ targetMenu addItem : [ NSMenuItem separatorItem ] ];
+}
+
+
+#pragma mark - Actions
+
+- ( AudioLock* ) lockForDirection : ( NSNumber* ) direction
+{
+    return ( direction.unsignedIntegerValue == AudioLockDirectionInput ) ? inputLock : outputLock;
 }
 
 
@@ -313,542 +739,205 @@ static const NSTimeInterval kRebuildCoalesceDelay = 0.15;
         return;
     }
 
-    AudioLockDirection direction = (AudioLockDirection)[tag[0] unsignedIntegerValue];
+    AudioLock *lock = [ self lockForDirection : tag[0] ];
     AudioDeviceID newId = (AudioDeviceID)[tag[1] unsignedIntValue];
 
-    AudioLock *lock = (direction == AudioLockDirectionInput) ? inputLock : outputLock;
+    LADebug("switching %{public}@ to new device : %u", lock.directionName, newId );
 
-    LADebug("switching %{public}@ to new device : %u",
-           direction == AudioLockDirectionInput ? @"input" : @"output", newId );
+    OSStatus status = [ lock applyForce : newId ];
+    if ( status != noErr )
+    {
+        // Leave the lock on its previous device rather than lock onto one macOS
+        // won't make the default.
+        LAError("switching %{public}@ to %u failed: OSStatus %d", lock.directionName, newId, (int)status );
+        [ self showAlertWithMessage : [ NSString stringWithFormat : @"Couldn’t switch %@ to “%@”", lock.directionName, item.title ]
+                        information : [ NSString stringWithFormat : @"macOS didn’t accept it as the default %@ device (error %d). The lock is unchanged.", lock.directionName, (int)status ] ];
+        return;
+    }
 
     lock.forcedID = newId;
     lock.forcedName = item.title;
     // Capture the stable UID so we can recover this exact device across
     // disconnect/reconnect even if its display name changes.
-    lock.forcedUID = [lock uidForDevice:newId];
+    lock.forcedUID = [ lock uidForDevice : newId ];
+    lock.forcedDeviceAvailable = YES;
+    lock.missingSince = nil;
+    lock.suppressNotificationsUntil = [ NSDate dateWithTimeIntervalSinceNow : kUserSwitchQuietPeriod ];
+    [ lock resetContention ];
+    [ lock saveToDefaults ];
 
-    // User-initiated switch: suppress the next forced notification for this
-    // direction (see suppressNext*Notification).
-    if ( direction == AudioLockDirectionInput ) {
-        suppressNextInputNotification = YES;
-    } else {
-        suppressNextOutputNotification = YES;
-    }
-
-    [lock saveToDefaults];
-    LADebug("Saved %{public}@ device: %d (name: %{public}@)",
-          direction == AudioLockDirectionInput ? @"input" : @"output",
-          lock.forcedID, lock.forcedName);
-
-    [lock applyForce:newId];
-
-    // Rebuild menu to show updated selection
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [self listDevices];
-    });
+    [ self enforceLocks ];
 }
 
 
-- ( void ) listDevices
+- ( void ) togglePause : ( NSMenuItem* ) item
 {
-    // Prevent recursive calls while rebuilding menu
-    if (rebuildingMenu) {
+    AudioLock *lock = [ self lockForDirection : item.representedObject ];
+    lock.paused = !lock.paused;
+    // Persist the user's pause preference (the section is visible here).
+    lock.pausePreference = lock.paused;
+    [ lock resetContention ];
+    [ self enforceLocks ];
+}
+
+
+// Show/hide a direction's options. Hiding removes the section from the menu and
+// force-pauses the lock so it stops forcing — but leaves the persisted pause
+// *preference* untouched. Showing restores the lock to that preference. Both the
+// show flag and the pause preference persist across launches.
+- ( void ) toggleShowOptions : ( NSMenuItem* ) item
+{
+    AudioLock *lock = [ self lockForDirection : item.representedObject ];
+    BOOL show = !lock.showsOptions;
+    lock.showsOptions = show;
+    lock.paused = show ? lock.pausePreference : YES;
+    [ lock resetContention ];
+    [ self enforceLocks ];
+}
+
+
+- ( void ) toggleNotifications : ( NSMenuItem* ) item
+{
+    AudioLock *lock = [ self lockForDirection : item.representedObject ];
+    BOOL enabled = !lock.notificationsEnabled;
+    lock.notificationsEnabled = enabled;
+    if ( !enabled )
+    {
         return;
     }
-    rebuildingMenu = YES;
 
-    // This rebuild covers any notification that arrived before it; drop any
-    // coalesced rebuild still pending for those.
-    rebuildGeneration++;
-
-    // Enumerate devices once and share the list between both locks; each lock
-    // also memoizes its per-device stream check for the duration of the rebuild.
-    NSData *deviceData = [AudioLock connectedDeviceIDs];
-    const AudioDeviceID *devices = deviceData.bytes;
-    int numberOfDevices = (int)( deviceData.length / sizeof( AudioDeviceID ) );
-    LADebug("devices found : %i" , numberOfDevices );
-    [inputLock invalidateDeviceCache];
-    [outputLock invalidateDeviceCache];
-
-    NSDictionary *bundleInfo = [ [ NSBundle mainBundle] infoDictionary];
-
-    NSString *versionString = [ NSString stringWithFormat : @"Version %@",
-                               bundleInfo[ @"CFBundleShortVersionString" ] ];
-
-    NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
-    BOOL showInput = [prefs boolForKey:kPrefShowInputOptions];
-    BOOL showOutput = [prefs boolForKey:kPrefShowOutputOptions];
-
-    menu = [ [ NSMenu alloc ] init ];
-    menu.delegate = self;
-    [ menu addItemWithTitle : versionString action : nil keyEquivalent : @"" ];
-    [ menu addItem : [ NSMenuItem separatorItem ] ]; // A thin grey line
-
-    // These per-section items only exist when their section is shown; they stay
-    // nil otherwise (setting .image / .state on nil is a harmless no-op).
-    NSMenuItem* pauseInput = nil;
-    NSMenuItem* pauseOutput = nil;
-    notificationsItem = nil;
-    outputNotificationsItem = nil;
-
-    // Input section (label, device list, per-direction pause) — only when shown.
-    if ( showInput )
-    {
-        [ menu addItemWithTitle : @"Forced input:" action : nil keyEquivalent : @"" ];
-        [ self appendDevicesForLock : inputLock toMenu : menu devices : devices count : numberOfDevices ];
-
-
-        pauseInput = [ menu
-                addItemWithTitle : @"Pause Input Lock"
-                action : @selector(manualPauseInput:)
-                keyEquivalent : @"" ];
-        if ( inputLock.paused ) [ pauseInput setState : NSControlStateValueOn ];
-
-        [ menu addItem : [ NSMenuItem separatorItem ] ]; // A thin grey line
-    }
-
-    // Output section (label, device list, per-direction pause) — only when shown.
-    if ( showOutput )
-    {
-        [ menu addItemWithTitle : @"Forced output:" action : nil keyEquivalent : @"" ];
-        [ self appendDevicesForLock : outputLock toMenu : menu devices : devices count : numberOfDevices ];
-
-
-        pauseOutput = [ menu
-                addItemWithTitle : @"Pause Output Lock"
-                action : @selector(manualPauseOutput:)
-                keyEquivalent : @"" ];
-        if ( outputLock.paused ) [ pauseOutput setState : NSControlStateValueOn ];
-
-        [ menu addItem : [ NSMenuItem separatorItem ] ]; // A thin grey line
-    }
-
-    startupItem = [ menu
-        addItemWithTitle : @"Open at login"
-        action : @selector(toggleStartupItem)
-        keyEquivalent : @"" ];
-
-    showInputItem = [ menu
-        addItemWithTitle : @"Show Input Options"
-        action : @selector(toggleShowInput)
-        keyEquivalent : @"" ];
-
-    showOutputItem = [ menu
-        addItemWithTitle : @"Show Output Options"
-        action : @selector(toggleShowOutput)
-        keyEquivalent : @"" ];
-
-    // Notify toggles only appear when their section is shown.
-    if ( showInput )
-    {
-        notificationsItem = [ menu
-            addItemWithTitle : @"Notify on forced input"
-            action : @selector(toggleNotifications)
-            keyEquivalent : @"" ];
-    }
-
-    if ( showOutput )
-    {
-        outputNotificationsItem = [ menu
-            addItemWithTitle : @"Notify on forced output"
-            action : @selector(toggleOutputNotifications)
-            keyEquivalent : @"" ];
-    }
-
-    [ menu addItem : [ NSMenuItem separatorItem ] ]; // A thin grey line
-
-    NSMenuItem *soundItem = [ menu
-        addItemWithTitle : @"Sound settings…"
-        action : @selector(openSoundSettings)
-        keyEquivalent : @"" ];
-
-    NSMenuItem *updateItem = [ menu
-        addItemWithTitle : @"Check for updates"
-        action : @selector(update)
-        keyEquivalent : @"" ];
-
-    NSMenuItem *aboutItem = [ menu
-        addItemWithTitle : @"About"
-        action : @selector(showAbout)
-        keyEquivalent : @"" ];
-
-    NSMenuItem *quitItem = [ menu
-        addItemWithTitle : @"Quit"
-        action : @selector(terminate)
-        keyEquivalent : @"" ];
-
-    // App-control items carry SF Symbol icons; selectable device rows stay
-    // icon-less (just a checkmark), so the icon vs no-icon contrast
-    // distinguishes actions from device choices.
-    pauseInput.image = [NSImage imageWithSystemSymbolName:@"pause.circle" accessibilityDescription:@"Pause Input Lock"];
-    pauseOutput.image = [NSImage imageWithSystemSymbolName:@"pause.circle" accessibilityDescription:@"Pause Output Lock"];
-    startupItem.image = [NSImage imageWithSystemSymbolName:@"power" accessibilityDescription:@"Open at login"];
-    showInputItem.image = [NSImage imageWithSystemSymbolName:@"mic" accessibilityDescription:@"Show Input Options"];
-    showOutputItem.image = [NSImage imageWithSystemSymbolName:@"speaker.wave.2" accessibilityDescription:@"Show Output Options"];
-    notificationsItem.image = [NSImage imageWithSystemSymbolName:@"bell" accessibilityDescription:@"Notify on forced input"];
-    outputNotificationsItem.image = [NSImage imageWithSystemSymbolName:@"bell" accessibilityDescription:@"Notify on forced output"];
-    soundItem.image = [NSImage imageWithSystemSymbolName:@"gearshape" accessibilityDescription:@"Sound settings"];
-    updateItem.image = [NSImage imageWithSystemSymbolName:@"arrow.triangle.2.circlepath" accessibilityDescription:@"Check for updates"];
-    aboutItem.image = [NSImage imageWithSystemSymbolName:@"info.circle" accessibilityDescription:@"About"];
-    quitItem.image = [NSImage imageWithSystemSymbolName:@"xmark.circle" accessibilityDescription:@"Quit"];
-
-
-    [ self updateToggleStates ];
-    [ self updateStartupItemState ];
-
-    [ statusItem setMenu : menu ];
-
-    rebuildingMenu = NO;
-    suppressNextInputNotification = NO;
-    suppressNextOutputNotification = NO;
+    // Prompts the first time; afterwards it reports the current permission
+    // without prompting. If notifications are off for LockAudio the toggle
+    // would otherwise do nothing visible, so say so.
+    [ [ UNUserNotificationCenter currentNotificationCenter ]
+        requestAuthorizationWithOptions : UNAuthorizationOptionAlert
+                      completionHandler : ^( BOOL granted, NSError * _Nullable error ) {
+        if ( error != nil )
+        {
+            LAError("Notification auth error: %{public}@", error );
+        }
+        if ( !granted )
+        {
+            dispatch_async( dispatch_get_main_queue(), ^{
+                [ self showNotificationsDeniedAlert ];
+            });
+        }
+    }];
 }
 
 
-// Resolves `lock`'s forced device to a currently-connected AudioDeviceID that
-// participates in this lock's direction, and returns whether it is available.
-// The forced AudioDeviceID can change across disconnect/reconnect, so we
-// re-derive it each rebuild:
-//   1. If the saved `forcedID` is still present AND still identifies the same
-//      device (its UID matches `forcedUID`), keep it. CoreAudio can recycle an
-//      AudioDeviceID for a different physical device, so when we have a UID we
-//      confirm it rather than trusting the bare id.
-//   2. Otherwise match by stable UID (kAudioDevicePropertyDeviceUID) — this is
-//      the reliable key and fixes output recovery, since a device's display
-//      name can change (AirPods codec mode) but its UID does not.
-//   3. Otherwise fall back to the display name (covers installs saved before
-//      UIDs were persisted) and backfill the UID so future recovery is robust.
-// Every match is filtered by `deviceParticipates:` so we never force a device
-// that has no stream in this direction. On a successful re-match the new id is
-// persisted. When the device isn't connected we keep the saved id/name/UID
-// untouched so it can recover later.
-- ( BOOL ) resolveForcedDeviceForLock : ( AudioLock* ) lock
-                            inDevices : ( const AudioDeviceID* ) devices
-                                count : ( int ) numberOfDevices
-
+- ( void ) toggleStartupItem
 {
-    NSString *dirName = ( lock.direction == AudioLockDirectionInput ) ? @"input" : @"output";
+    NSError *error = nil;
+    BOOL ok;
 
-    // Nothing forced yet (and no saved identity to recover from).
-    if ( lock.forcedID == UINT32_MAX && lock.forcedUID == nil && lock.forcedName == nil )
+    if ( [ GBLaunchAtLogin isLoginItem ] )
     {
-        return NO;
+        ok = [ GBLaunchAtLogin removeAppFromLoginItems : &error ];
+    }
+    else if ( [ GBLaunchAtLogin loginItemRequiresApproval ] )
+    {
+        // Registered, but switched off in System Settings. Only the user can
+        // turn it back on there.
+        [ self showLoginItemNeedsApprovalAlert ];
+        return;
+    }
+    else
+    {
+        ok = [ GBLaunchAtLogin addAppAsLoginItem : &error ];
     }
 
-    // 1. Saved id still present, participating, and (when we have a UID) still
-    //    the same physical device? Keep it.
-    if ( lock.forcedID < UINT32_MAX )
+    // Mirror the resulting state into preferences so it survives a future
+    // bundle-identifier change (see migrateSettingsFromLegacyBundleIfNeeded).
+    [ [ NSUserDefaults standardUserDefaults ] setBool : [ GBLaunchAtLogin isLoginItem ]
+                                               forKey : kPrefLaunchAtLogin ];
+
+    if ( !ok )
     {
-        for ( int index = 0; index < numberOfDevices; index++ )
+        LAError("Changing login item failed: %{public}@", error );
+        if ( [ GBLaunchAtLogin loginItemRequiresApproval ] )
         {
-            if ( devices[index] != lock.forcedID )
-            {
-                continue;
-            }
-            if ( ![lock deviceParticipates:devices[index]] )
-            {
-                break; // id present but not in our direction — try UID/name.
-            }
-            if ( lock.forcedUID != nil )
-            {
-                // We have a stable UID, so the bare id is only trustworthy if it
-                // still identifies the same device. Require a positive UID match:
-                // a mismatch (id recycled) OR an unreadable UID both fall through
-                // to the authoritative UID search rather than risk the wrong one.
-                NSString *uid = [lock uidForDevice:devices[index]];
-                if ( ![lock.forcedUID isEqualToString:uid] )
-                {
-                    LADebug("forced %{public}@ id %u no longer confirms UID %{public}@; re-resolving by UID",
-                           dirName, (unsigned int)lock.forcedID, lock.forcedUID );
-                    break; // fall through to UID search.
-                }
-            }
-            else
-            {
-                // Install saved before UIDs were persisted. Backfill now so the
-                // id gets UID-confirmed from here on, instead of waiting for a
-                // disconnect to route through the name fallback.
-                NSString *uid = [lock uidForDevice:devices[index]];
-                if ( uid != nil )
-                {
-                    LADebug("backfilling %{public}@ UID %{public}@ for device %u", dirName, uid, (unsigned int)lock.forcedID );
-                    lock.forcedUID = uid;
-                    [lock saveToDefaults];
-                }
-            }
-            LADebug("forced %{public}@ found in device list", dirName );
-            return YES;
-
-        }
-    }
-
-    // 2. Match by stable UID.
-    if ( lock.forcedUID != nil )
-    {
-        for ( int index = 0; index < numberOfDevices; index++ )
-        {
-            if ( ![lock deviceParticipates:devices[index]] )
-            {
-                continue;
-            }
-            NSString *uid = [lock uidForDevice:devices[index]];
-            if ( uid != nil && [uid isEqualToString:lock.forcedUID] )
-            {
-                LADebug("forced %{public}@ recovered by UID: %{public}@ -> %u", dirName, uid, (unsigned int)devices[index] );
-                lock.forcedID = devices[index];
-                [lock saveToDefaults];
-                return YES;
-            }
-        }
-    }
-
-    // 3. Fall back to display name; backfill the UID for next time.
-    if ( lock.forcedName != nil )
-    {
-        for ( int index = 0; index < numberOfDevices; index++ )
-        {
-            if ( ![lock deviceParticipates:devices[index]] )
-            {
-                continue;
-            }
-            NSString *nameStr = [lock nameForDevice:devices[index]];
-            if ( nameStr != nil && [nameStr isEqualToString:lock.forcedName] )
-            {
-                LADebug("forced %{public}@ recovered by name: %{public}@ -> %u", dirName, nameStr, (unsigned int)devices[index] );
-                lock.forcedID = devices[index];
-                lock.forcedUID = [lock uidForDevice:devices[index]];
-                [lock saveToDefaults];
-                return YES;
-            }
-        }
-    }
-
-    LADebug("forced %{public}@ device '%{public}@' not connected; keeping saved selection for recovery", dirName, lock.forcedName );
-    return NO;
-}
-
-// Resolves/recovers `lock`'s forced device, appends one menu item per
-// participating device (checkmark on the forced one), and re-applies the force
-// if another device has stolen the default. Ported from the original
-// single-direction listDevices logic.
-- ( void ) appendDevicesForLock : ( AudioLock* ) lock
-                          toMenu : ( NSMenu* ) targetMenu
-                         devices : ( const AudioDeviceID* ) dev_array
-                           count : ( int ) numberOfDevices
-{
-    BOOL isInput
- = ( lock.direction == AudioLockDirectionInput );
-    NSString *dirName = isInput ? @"input" : @"output";
-
-    // Maps deviceID -> name for the participating devices, used to name the
-    // "offending" device that stole the default.
-    NSMutableDictionary<NSNumber *, NSString *> *idToName = [NSMutableDictionary dictionary];
-
-    // Resolve the forced device to a currently-connected AudioDeviceID. Prefers
-    // the stable UID, falls back to the display name (and backfills the UID for
-    // installs saved before UIDs were persisted). This is what makes a forced
-    // device survive disconnect/reconnect even though its AudioDeviceID — and,
-    // for some devices like AirPods, its display name — can change.
-    BOOL forcedDeviceAvailable = [self resolveForcedDeviceForLock:lock
-                                                        inDevices:dev_array
-                                                            count:numberOfDevices];
-
-    // Default the INPUT lock to the built-in microphone when nothing has ever
-    // been saved. Output locking is opt-in, so it has no default device. The
-    // built-in device is identified by CoreAudio transport type rather than by
-    // name: Intel Macs call it "Built-in Microphone" but Apple Silicon Macs use
-    // "MacBook Pro Microphone" / "Mac Studio Speakers", so a name heuristic
-    // silently matched nothing on modern hardware.
-    if ( isInput && !forcedDeviceAvailable
-         && lock.forcedID == UINT32_MAX && lock.forcedName == nil && lock.forcedUID == nil )
-    {
-        AudioDeviceID builtInID = [ lock builtInDeviceInDevices : dev_array
-                                                          count : numberOfDevices ];
-        NSString *builtInName = ( builtInID != kAudioDeviceUnknown ) ? [ lock nameForDevice : builtInID ] : nil;
-
-        if ( builtInName != nil )
-        {
-            LADebug("setting default forced %{public}@ : %{public}@  %u", dirName, builtInName, (unsigned int)builtInID );
-
-            lock.forcedID = builtInID;
-            lock.forcedName = builtInName;
-            lock.forcedUID = [lock uidForDevice:builtInID];
-            forcedDeviceAvailable = YES;
-            [lock saveToDefaults];
-        }
-    }
-
-    for( int index = 0 ;
-
-             index < numberOfDevices ;
-             index++ )
-    {
-
-        AudioDeviceID oneDeviceID = dev_array[ index ];
-
-        // Only list devices that participate in this lock's direction.
-        if ( ![ lock deviceParticipates : oneDeviceID ] )
-        {
-            continue;
-        }
-
-        // Get the display name.
-        NSString* nameStr = [ lock nameForDevice : oneDeviceID ];
-        if ( nameStr == nil )
-        {
-            // Name unreadable. If this is the currently-forced device (e.g.
-            // recovered by UID through a transient name-read failure), show a
-            // *disabled* row under its saved name so the user still sees what's
-            // locked and the checkmark stays put — but it isn't selectable, so a
-            // placeholder can never be written back into forcedName. Any other
-            // unreadable device is simply omitted (it was never useful to list).
-            if ( oneDeviceID == lock.forcedID && lock.forcedName != nil )
-            {
-                NSMenuItem* forcedItem = [ targetMenu
-                    addItemWithTitle : lock.forcedName
-                    action : NULL
-                    keyEquivalent : @"" ];
-                [ forcedItem setEnabled : NO ];
-                [ forcedItem setState : NSControlStateValueOn ];
-                LADebug("%{public}@ forced device name unreadable; showing saved name '%{public}@' (%u)",
-                       dirName, lock.forcedName, (unsigned int)oneDeviceID );
-            }
-            continue;
-        }
-
-        LADebug("found %{public}@ device : %{public}@  %u" , dirName, nameStr , (unsigned int)oneDeviceID );
-
-        NSMenuItem* item = [ targetMenu
-
-            addItemWithTitle : nameStr
-            action : @selector(deviceSelected:)
-            keyEquivalent : @"" ];
-        item.representedObject = @[ @(lock.direction), @((unsigned int)oneDeviceID) ];
-
-        if ( oneDeviceID == lock.forcedID )
-        {
-            [ item setState : NSControlStateValueOn ];
-            LADebug("%{public}@ device selected : %{public}@  %u" , dirName, nameStr , (unsigned int)oneDeviceID );
-        }
-
-        idToName[ @((unsigned int)oneDeviceID) ] = nameStr;
-    }
-
-    // Force the device if needed (the callback will trigger another listDevices)
-    AudioDeviceID deviceID = [ lock currentDefaultDevice ];
-    LADebug("default %{public}@ device is %u" , dirName, deviceID );
-
-    if ( !lock.paused && forcedDeviceAvailable && deviceID != lock.forcedID )
-    {
-        LADebug("forcing %{public}@ device for default : %u" , dirName, lock.forcedID );
-
-        NSString *offendingName = idToName[ @((unsigned int)deviceID) ];
-
-        OSStatus forceStatus = [ lock applyForce : lock.forcedID ];
-
-        BOOL suppress = isInput ? suppressNextInputNotification : suppressNextOutputNotification;
-
-        if ( forceStatus == noErr )
-        {
-            if ( suppress )
-            {
-                LADebug("suppressing forced-%{public}@ notification for user-initiated switch", dirName );
-            }
-            else
-            {
-                [ self handleForceAppliedForLock : lock
-                                            name : lock.forcedName
-                                   offendingName : offendingName ];
-            }
+            [ self showLoginItemNeedsApprovalAlert ];
         }
         else
         {
-            LAError("force %{public}@ failed: OSStatus %d", dirName, (int)forceStatus );
-        }
-
-        // No need to dispatch listDevices here — the CoreAudio property
-        // listener callback will fire and call listDevices for us.
-    }
-    else if ( !lock.paused && !forcedDeviceAvailable && lock.forcedName != nil )
-    {
-        // The forced device is disconnected. Don't leave the default to macOS,
-        // which can land on an arbitrary device (e.g. a RØDE that's both an
-        // input and output) instead of the built-in. Actively fall back to the
-        // built-in device so output returns to the MacBook speakers (and input
-        // to the built-in mic). The saved selection is untouched, so the lock
-        // recovers the forced device the moment it reconnects.
-        AudioDeviceID builtInID = [ lock builtInDeviceInDevices : dev_array
-                                                          count : numberOfDevices ];
-
-        if ( builtInID != kAudioDeviceUnknown && deviceID != builtInID )
-        {
-            LADebug("forced %{public}@ device '%{public}@' not connected; falling back to built-in %u",
-                   dirName, lock.forcedName, (unsigned int)builtInID );
-
-            OSStatus forceStatus = [ lock applyForce : builtInID ];
-            if ( forceStatus != noErr )
-            {
-                LAError("fallback %{public}@ force failed: OSStatus %d", dirName, (int)forceStatus );
-            }
-            // No notification: a disconnect-driven fallback to built-in isn't the
-            // same event as another device stealing the lock, and notifying on
-            // every disconnect would be noisy. The property-listener callback
-            // will fire and rebuild the menu.
-        }
-        else
-        {
-            LADebug("forced %{public}@ device '%{public}@' not connected; no built-in fallback applied (built-in %u, current default %u)",
-                   dirName, lock.forcedName, (unsigned int)builtInID, (unsigned int)deviceID );
+            [ self showAlertWithMessage : @"Couldn’t change Open at Login"
+                            information : error.localizedDescription ?: @"An unknown error occurred." ];
         }
     }
 }
 
-
-
-- ( void ) manualPauseInput : ( NSMenuItem* ) item
-{
-    BOOL paused = !inputLock.paused;
-    inputLock.paused = paused;
-    // Persist the user's pause preference (the section is visible here).
-    [[NSUserDefaults standardUserDefaults] setBool:paused forKey:kPrefInputPaused];
-    [ self listDevices ];
-}
-
-- ( void ) manualPauseOutput : ( NSMenuItem* ) item
-{
-    BOOL paused = !outputLock.paused;
-    outputLock.paused = paused;
-    [[NSUserDefaults standardUserDefaults] setBool:paused forKey:kPrefOutputPaused];
-    [ self listDevices ];
-}
-
-- ( void ) terminate
-{
-    [ NSApp terminate : nil ];
-}
-
-- ( void ) update
-{
-    [self.updaterController checkForUpdates:nil];
-}
 
 - ( void ) openSoundSettings
 {
     // General Sound pane (app manages both input and output).
     NSURL *url = [NSURL URLWithString:@"x-apple.systempreferences:com.apple.Sound-Settings.extension"];
     [[NSWorkspace sharedWorkspace] openURL:url];
-
 }
+
+
+#pragma mark - Alerts
+
+- ( void ) activateApp
+{
+    if (@available(macOS 14.0, *)) {
+        [NSApp activate];
+    } else {
+        [NSApp activateIgnoringOtherApps:YES];
+    }
+}
+
+
+- ( void ) showAlertWithMessage : ( NSString* ) message information : ( NSString* ) information
+{
+    NSAlert *alert = [ [ NSAlert alloc ] init ];
+    alert.messageText = message;
+    alert.informativeText = information;
+    [ self activateApp ];
+    [ alert runModal ];
+}
+
+
+- ( void ) showNotificationsDeniedAlert
+{
+    NSAlert *alert = [ [ NSAlert alloc ] init ];
+    alert.messageText = @"Notifications are turned off for LockAudio";
+    alert.informativeText = @"LockAudio can’t tell you when it switches a device back until notifications are allowed in System Settings.";
+    [ alert addButtonWithTitle : @"Open Notification Settings" ];
+    [ alert addButtonWithTitle : @"Not Now" ];
+    [ self activateApp ];
+    if ( [ alert runModal ] == NSAlertFirstButtonReturn )
+    {
+        NSString *bundleID = [ NSBundle mainBundle ].bundleIdentifier;
+        NSString *urlString = [ NSString stringWithFormat : @"x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=%@", bundleID ];
+        [ [ NSWorkspace sharedWorkspace ] openURL : [ NSURL URLWithString : urlString ] ];
+    }
+}
+
+
+- ( void ) showLoginItemNeedsApprovalAlert
+{
+    NSAlert *alert = [ [ NSAlert alloc ] init ];
+    alert.messageText = @"LockAudio is turned off in Login Items";
+    alert.informativeText = @"To open LockAudio at login, turn it on under “Open at Login” in System Settings → General → Login Items.";
+    [ alert addButtonWithTitle : @"Open Login Items Settings" ];
+    [ alert addButtonWithTitle : @"Cancel" ];
+    [ self activateApp ];
+    if ( [ alert runModal ] == NSAlertFirstButtonReturn )
+    {
+        [ GBLaunchAtLogin openLoginItemsSettings ];
+    }
+}
+
+
+#pragma mark - About
 
 - ( void ) showAbout
 {
     if (aboutWindow == nil) {
         aboutWindow = [self buildAboutWindow];
     }
-    if (@available(macOS 14.0, *)) {
-        [NSApp activate];
-    } else {
-        [NSApp activateIgnoringOtherApps:YES];
-    }
+    [ self activateApp ];
 
     [aboutWindow center];
     [aboutWindow makeKeyAndOrderFront:nil];
@@ -953,164 +1042,93 @@ static const NSTimeInterval kRebuildCoalesceDelay = 0.15;
     return wrapper;
 }
 
-- (void)toggleStartupItem
-{
-    if ( [GBLaunchAtLogin isLoginItem] )
-    {
-        [GBLaunchAtLogin removeAppFromLoginItems];
-    }
-    else
-    {
-        [GBLaunchAtLogin addAppAsLoginItem];
-    }
 
-    // Mirror the resulting state into preferences so it survives a future
-    // bundle-identifier change (see migrateSettingsFromLegacyBundleIfNeeded).
-    [[NSUserDefaults standardUserDefaults] setBool:[GBLaunchAtLogin isLoginItem]
-                                            forKey:kPrefLaunchAtLogin];
+#pragma mark - Notifications
 
-    [self updateStartupItemState];
-}
-
-- (void)updateStartupItemState
-{
-    [startupItem setState: [GBLaunchAtLogin isLoginItem] ? NSControlStateValueOn : NSControlStateValueOff];
-}
-
-- (void)updateToggleStates
-{
-    NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
-    [notificationsItem setState: [prefs boolForKey:kPrefNotificationsEnabled] ? NSControlStateValueOn : NSControlStateValueOff];
-    [outputNotificationsItem setState: [prefs boolForKey:kPrefOutputNotificationsEnabled] ? NSControlStateValueOn : NSControlStateValueOff];
-    [showInputItem setState: [prefs boolForKey:kPrefShowInputOptions] ? NSControlStateValueOn : NSControlStateValueOff];
-    [showOutputItem setState: [prefs boolForKey:kPrefShowOutputOptions] ? NSControlStateValueOn : NSControlStateValueOff];
-}
-
-- (void)toggleNotifications
-{
-    NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
-    BOOL enabled = ![prefs boolForKey:kPrefNotificationsEnabled];
-    [prefs setBool:enabled forKey:kPrefNotificationsEnabled];
-    [self updateToggleStates];
-    if (enabled) {
-        [self requestNotificationAuthorizationIfNeeded];
-    }
-}
-
-- (void)toggleOutputNotifications
-{
-    NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
-    BOOL enabled = ![prefs boolForKey:kPrefOutputNotificationsEnabled];
-    [prefs setBool:enabled forKey:kPrefOutputNotificationsEnabled];
-    [self updateToggleStates];
-    if (enabled) {
-        [self requestNotificationAuthorizationIfNeeded];
-    }
-}
-
-// Show/hide a direction's options. Hiding removes the section from the menu and
-// force-pauses the lock so it stops forcing — but leaves the persisted pause
-// *preference* untouched. Showing restores the lock to that preference. Both the
-// show flag and the pause preference persist across launches.
-- (void)setShowOptions:(BOOL)show forLock:(AudioLock *)lock
-            showPrefKey:(NSString *)showPrefKey
-           pausePrefKey:(NSString *)pausePrefKey
-{
-    NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
-    [prefs setBool:show forKey:showPrefKey];
-
-    if (show) {
-        // Restore the persisted pause preference for this direction.
-        lock.paused = [prefs boolForKey:pausePrefKey];
-    } else {
-        // Force-pause at runtime to stop forcing; the persisted preference is
-        // left as-is so showing again returns to the user's real choice.
-        lock.paused = YES;
-    }
-
-    [self listDevices];
-}
-
-- (void)toggleShowInput
-{
-    BOOL show = ![[NSUserDefaults standardUserDefaults] boolForKey:kPrefShowInputOptions];
-    [self setShowOptions:show forLock:inputLock
-              showPrefKey:kPrefShowInputOptions
-             pausePrefKey:kPrefInputPaused];
-}
-
-- (void)toggleShowOutput
-{
-    BOOL show = ![[NSUserDefaults standardUserDefaults] boolForKey:kPrefShowOutputOptions];
-    [self setShowOptions:show forLock:outputLock
-              showPrefKey:kPrefShowOutputOptions
-             pausePrefKey:kPrefOutputPaused];
-}
-
+// Asks for permission at launch only when a notify toggle is on (the input one
+// is by default), so the prompt appears in context of a feature that uses it.
 - (void)requestNotificationAuthorizationIfNeeded
 {
-    NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
-    if (![prefs boolForKey:kPrefNotificationsEnabled] &&
-        ![prefs boolForKey:kPrefOutputNotificationsEnabled]) {
+    if (!inputLock.notificationsEnabled && !outputLock.notificationsEnabled) {
         return;
     }
 
-    UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
-    [center requestAuthorizationWithOptions:(UNAuthorizationOptionAlert | UNAuthorizationOptionSound)
-                          completionHandler:^(BOOL granted, NSError * _Nullable error) {
+    [[UNUserNotificationCenter currentNotificationCenter]
+        requestAuthorizationWithOptions:UNAuthorizationOptionAlert
+                      completionHandler:^(BOOL granted, NSError * _Nullable error) {
         if (error) {
             LAError("Notification auth error: %{public}@", error);
         }
-        self->notificationAuthGranted = granted;
     }];
 }
 
-- (void)handleForceAppliedForLock:(AudioLock *)lock
-                             name:(NSString *)deviceName
-                    offendingName:(NSString *)offendingName
+- (void)postForcedNotificationForLock:(AudioLock *)lock
+                        offendingName:(NSString *)offendingName
 {
-    BOOL isInput = (lock.direction == AudioLockDirectionInput);
-    NSString *dirWord = isInput ? @"input" : @"output";
-
-    // Per-direction minimum-gap throttle.
     NSDate *now = [NSDate date];
-    NSDate *last = isInput ? lastInputNotificationTime : lastOutputNotificationTime;
-    if (last != nil && [now timeIntervalSinceDate:last] < kMinNotificationGap) {
+
+    // User-initiated switch: its echo through the listeners isn't news.
+    if (lock.suppressNotificationsUntil != nil && [now compare:lock.suppressNotificationsUntil] == NSOrderedAscending) {
+        LADebug("suppressing forced-%{public}@ notification for user-initiated switch", lock.directionName);
         return;
     }
-    if (isInput) {
-        lastInputNotificationTime = now;
-    } else {
-        lastOutputNotificationTime = now;
+
+    // Per-direction minimum-gap throttle.
+    if (lock.lastNotificationTime != nil && [now timeIntervalSinceDate:lock.lastNotificationTime] < kMinNotificationGap) {
+        return;
+    }
+    lock.lastNotificationTime = now;
+
+    NSString *dirWord = lock.directionName;
+    NSString *forcedName = lock.forcedName ?: @"selected device";
+    NSString *body = (offendingName != nil)
+        ? [NSString stringWithFormat:@"%@ took %@ control. Forced %@ back to %@.", offendingName, dirWord, dirWord, forcedName]
+        : [NSString stringWithFormat:@"Another device took %@ control. Forced %@ back to %@.", dirWord, dirWord, forcedName];
+
+    [self postNotificationForLock:lock
+                             kind:@"forced"
+                            title:[NSString stringWithFormat:@"Forced %@ active", dirWord]
+                             body:body];
+}
+
+// Posts if the lock's notify toggle is on and the screen isn't locked. The
+// identifier is fixed per kind and direction, so a new notification replaces
+// the previous one instead of piling up in Notification Center. If the user
+// has turned notifications off in System Settings, the system drops it.
+- (void)postNotificationForLock:(AudioLock *)lock
+                           kind:(NSString *)kind
+                          title:(NSString *)title
+                           body:(NSString *)body
+{
+    if (!lock.notificationsEnabled || screenLocked) {
+        return;
     }
 
-    NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
-    NSString *enabledKey = isInput ? kPrefNotificationsEnabled : kPrefOutputNotificationsEnabled;
+    UNMutableNotificationContent *content = [[UNMutableNotificationContent alloc] init];
+    content.title = title;
+    content.body = body;
 
-    if ([prefs boolForKey:enabledKey] && notificationAuthGranted && !screenLocked) {
-        UNMutableNotificationContent *content = [[UNMutableNotificationContent alloc] init];
-        content.title = isInput ? @"Forced input active" : @"Forced output active";
+    NSString *identifier = [NSString stringWithFormat:@"com.lockaudio.%@.%@", kind, lock.directionName];
+    UNNotificationRequest *request = [UNNotificationRequest requestWithIdentifier:identifier
+                                                                          content:content
+                                                                          trigger:nil];
 
-        NSString *forcedName = deviceName ?: @"selected device";
-        if (offendingName != nil) {
-            content.body = [NSString stringWithFormat:@"%@ took %@ control. Forced %@ back to %@.", offendingName, dirWord, dirWord, forcedName];
-        } else {
-            content.body = [NSString stringWithFormat:@"Another device took %@ control. Forced %@ back to %@.", dirWord, dirWord, forcedName];
-        }
+    [[UNUserNotificationCenter currentNotificationCenter]
+        addNotificationRequest:request
+         withCompletionHandler:^(NSError * _Nullable error) {
+             if (error) {
+                 LAError("Failed to post notification: %{public}@", error);
+             }
+         }];
+}
 
-        UNNotificationRequest *request = [UNNotificationRequest
-            requestWithIdentifier:[[NSUUID UUID] UUIDString]
-                          content:content
-                          trigger:nil];
-
-        [[UNUserNotificationCenter currentNotificationCenter]
-            addNotificationRequest:request
-             withCompletionHandler:^(NSError * _Nullable error) {
-                 if (error) {
-                     LAError("Failed to post notification: %{public}@", error);
-                 }
-             }];
-    }
+// Without this, notifications are silently dropped while LockAudio is the
+// active app (e.g. the About window or an alert is up).
+- (void)userNotificationCenter:(UNUserNotificationCenter *)center
+       willPresentNotification:(UNNotification *)notification
+         withCompletionHandler:(void (^)(UNNotificationPresentationOptions))completionHandler
+{
+    completionHandler(UNNotificationPresentationOptionBanner | UNNotificationPresentationOptionList);
 }
 
 - (void)screenDidLock:(NSNotification *)note
@@ -1121,12 +1139,6 @@ static const NSTimeInterval kRebuildCoalesceDelay = 0.15;
 - (void)screenDidUnlock:(NSNotification *)note
 {
     screenLocked = NO;
-}
-
-- (void)menuWillOpen:(NSMenu *)menu
-{
-    [self updateStartupItemState];
-    [self updateToggleStates];
 }
 
 @end

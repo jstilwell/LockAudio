@@ -20,6 +20,8 @@ echo -e "${YELLOW}Stopping any running instance...${NC}"
 pkill -x "$PROJECT_NAME" 2>/dev/null || true
 sleep 1
 
+# Ad-hoc signed: a local debug build doesn't need a "Mac Development"
+# certificate (release builds are signed by build-release.sh).
 echo -e "${YELLOW}Building Debug (arm64)...${NC}"
 # Fixed (gitignored) derived-data path so incremental builds and the resolved
 # Sparkle package are reused between runs.
@@ -31,6 +33,7 @@ xcodebuild \
     -configuration Debug \
     -derivedDataPath "$BUILD_DIR" \
     -arch arm64 \
+    CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= \
     build > "$BUILD_DIR/build.log" 2>&1 || {
         echo -e "${RED}Build failed. Last 40 lines:${NC}"
         tail -40 "$BUILD_DIR/build.log"
@@ -54,4 +57,4 @@ echo -e "${GREEN}Running.${NC} Watch the menu bar for the AirPods icon."
 echo
 echo "Live logs (Ctrl+C to stop tailing — the app keeps running):"
 echo "---"
-log stream --predicate 'process == "LockAudio"' --level debug
+/usr/bin/log stream --predicate 'process == "LockAudio"' --level debug
