@@ -21,6 +21,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- New app icon and menu bar icon: a padlock with sound bars replaces the AirPods artwork, since LockAudio works with any audio device. The menu bar icon opens its shackle when a lock is paused and shows a slash when it needs attention.
 - Menu items use standard macOS wording, such as "Check for Updates…" and "Quit LockAudio", and Quit has the usual Command-Q shortcut.
 - Updates are verified more strictly: the update feed is now signed, and downloads are checked before they are unpacked.
 
