@@ -21,7 +21,10 @@ pkill -x "$PROJECT_NAME" 2>/dev/null || true
 sleep 1
 
 echo -e "${YELLOW}Building Debug (arm64)...${NC}"
-BUILD_DIR=$(mktemp -d)
+# Fixed (gitignored) derived-data path so incremental builds and the resolved
+# Sparkle package are reused between runs.
+BUILD_DIR="$PROJECT_DIR/build/DerivedData"
+mkdir -p "$BUILD_DIR"
 xcodebuild \
     -project "$PROJECT_FILE" \
     -scheme "$SCHEME" \
