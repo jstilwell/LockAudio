@@ -254,6 +254,19 @@ hdiutil create -volname "$PROJECT_NAME" \
 # Clean up temp directory
 rm -rf "$DMG_TEMP"
 
+# Code-sign the DMG itself (Apple's recommendation for distributed disk images;
+# notarization alone leaves the container unsigned). Use the same Developer ID
+# that Xcode signed the app with, read back from the built app.
+SIGNING_IDENTITY=$(codesign -dvv "$RELEASE_DIR/$APP_NAME" 2>&1 \
+    | awk -F= '/^Authority=Developer ID Application/{print $2; exit}')
+if [ -z "$SIGNING_IDENTITY" ]; then
+    echo -e "${RED}Error: built app is not signed with a Developer ID Application identity${NC}"
+    exit 1
+fi
+echo -e "${YELLOW}Signing DMG as ${SIGNING_IDENTITY}...${NC}"
+codesign --sign "$SIGNING_IDENTITY" --timestamp "$DMG_PATH"
+codesign --verify --strict "$DMG_PATH"
+
 # Notarize the DMG. Any outcome other than "Accepted" aborts the release: a
 # DMG that isn't notarized and stapled is blocked by Gatekeeper for every new
 # download, so it must never reach GitHub or the appcast.
@@ -288,6 +301,12 @@ echo -e "${GREEN}Notarization successful!${NC}"
 echo -e "${YELLOW}Stapling notarization ticket to DMG...${NC}"
 xcrun stapler staple "$DMG_PATH"
 echo -e "${GREEN}Stapling complete!${NC}"
+
+# What a user's Mac checks on first open: a signed, notarized disk image.
+if ! spctl -a -t open --context context:primary-signature -v "$DMG_PATH"; then
+    echo -e "${RED}Error: Gatekeeper rejects the DMG. Release aborted.${NC}"
+    exit 1
+fi
 
 echo ""
 
