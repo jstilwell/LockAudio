@@ -245,11 +245,18 @@ cp -R "$RELEASE_DIR/$APP_NAME" "$DMG_TEMP/"
 # Create a symlink to /Applications with a space prefix to sort after the app name
 ln -s /Applications "$DMG_TEMP/ Applications"
 
-# Create the DMG in the release directory
-hdiutil create -volname "$PROJECT_NAME" \
-    -srcfolder "$DMG_TEMP" \
-    -ov -format UDZO \
-    "$DMG_PATH"
+# Create the DMG in the release directory. Current macOS makes disk images with
+# diskutil (hdiutil create is deprecated there); older systems only have hdiutil.
+# diskutil doesn't overwrite, so a stale DMG goes first.
+rm -f "$DMG_PATH"
+if diskutil image create from -h > /dev/null 2>&1; then
+    diskutil image create from --format UDZO --volumeName "$PROJECT_NAME" "$DMG_TEMP" "$DMG_PATH"
+else
+    hdiutil create -volname "$PROJECT_NAME" \
+        -srcfolder "$DMG_TEMP" \
+        -ov -format UDZO \
+        "$DMG_PATH"
+fi
 
 # Clean up temp directory
 rm -rf "$DMG_TEMP"
