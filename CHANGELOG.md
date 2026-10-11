@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- The icons next to menu actions are back on macOS 27, which hides menu icons unless an app asks for them.
+
 ## 2.1.0 - 10-02-2026
 
 ### Added
