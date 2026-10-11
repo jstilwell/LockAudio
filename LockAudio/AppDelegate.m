@@ -947,6 +947,11 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
 
     [aboutWindow center];
     [aboutWindow makeKeyAndOrderFront:nil];
+    // On macOS 14+ activation is only a request: it can land late or be
+    // declined (the menu is still closing when this runs), which left the
+    // window behind the frontmost app. Bring it forward regardless; it becomes
+    // key once the app activates or the user clicks it.
+    [aboutWindow orderFrontRegardless];
 }
 
 - (NSWindow *)buildAboutWindow
