@@ -998,7 +998,7 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
     NSArray *links = @[
         @[@"https://www.lockaudio.com", @"https://www.lockaudio.com"],
         @[@"https://github.com/jstilwell/LockAudio", @"https://github.com/jstilwell/LockAudio"],
-        @[@"contact@lockaudio.com", @"mailto:contact@lockaudio.com"],
+        @[@"jesse@stilwe.com", @"mailto:jesse@stilwe.com"],
     ];
     CGFloat linksTop = H - 215;
     CGFloat linkHeight = 20;
