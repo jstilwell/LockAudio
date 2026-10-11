@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## 2.1.1 - 10-11-2026
+
+### Fixed
+
+- The icons next to menu actions are back on macOS 27, which hides menu icons unless an app asks for them.
+- About LockAudio now opens on the first click instead of sometimes appearing behind other windows.
+
 ## 2.1.0 - 10-02-2026
 
 ### Added

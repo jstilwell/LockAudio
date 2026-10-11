@@ -560,6 +560,11 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
     if ( symbol != nil )
     {
         item.image = [ NSImage imageWithSystemSymbolName : symbol accessibilityDescription : nil ];
+        // macOS 27 hides menu item symbol images unless the item opts in.
+        if ( @available( macOS 27.0, * ) )
+        {
+            item.preferredImageVisibility = NSMenuItemImageVisibilityVisible;
+        }
     }
     return item;
 }
@@ -942,6 +947,11 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
 
     [aboutWindow center];
     [aboutWindow makeKeyAndOrderFront:nil];
+    // On macOS 14+ activation is only a request: it can land late or be
+    // declined (the menu is still closing when this runs), which left the
+    // window behind the frontmost app. Bring it forward regardless; it becomes
+    // key once the app activates or the user clicks it.
+    [aboutWindow orderFrontRegardless];
 }
 
 - (NSWindow *)buildAboutWindow
