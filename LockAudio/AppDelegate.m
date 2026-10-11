@@ -560,6 +560,11 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
     if ( symbol != nil )
     {
         item.image = [ NSImage imageWithSystemSymbolName : symbol accessibilityDescription : nil ];
+        // macOS 27 hides menu item symbol images unless the item opts in.
+        if ( @available( macOS 27.0, * ) )
+        {
+            item.preferredImageVisibility = NSMenuItemImageVisibilityVisible;
+        }
     }
     return item;
 }
