@@ -5,14 +5,22 @@
 #import <UserNotifications/UserNotifications.h>
 
 @interface LinkCursorView : NSView
+// Area that shows the pointing-hand cursor; empty means the whole view.
+@property (nonatomic) NSRect linkRect;
 @end
 
 @implementation LinkCursorView
 - (void)resetCursorRects
 {
-    [self addCursorRect:self.bounds cursor:[NSCursor pointingHandCursor]];
+    NSRect rect = NSIsEmptyRect(self.linkRect) ? self.bounds : self.linkRect;
+    [self addCursorRect:rect cursor:[NSCursor pointingHandCursor]];
 }
 @end
+
+// Copyright holder named in Info.plist's NSHumanReadableCopyright; the About
+// window links this part of the copyright line to the holder's site.
+static NSString* const kCopyrightHolder = @"Stilwe LLC";
+static NSString* const kCopyrightHolderURL = @"https://stilwe.com";
 
 // Per-direction preference keys (device, show/hide, pause, notify) live in
 // AudioLock. These are the app-wide ones.
@@ -1011,14 +1019,46 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
         [content addSubview:linkView];
     }
 
-    // Copyright
+    // Copyright, with the holder's name linking to its site
     NSString *copyright = [[NSBundle mainBundle] infoDictionary][@"NSHumanReadableCopyright"] ?: @"";
-    NSTextField *copyrightLabel = [NSTextField labelWithString:copyright];
-    copyrightLabel.font = [NSFont systemFontOfSize:11];
-    copyrightLabel.textColor = [NSColor tertiaryLabelColor];
+    NSRect copyrightFrame = NSMakeRect(20, 36, W - 40, 16);
+    NSMutableParagraphStyle *centered = [[NSMutableParagraphStyle alloc] init];
+    centered.alignment = NSTextAlignmentCenter;
+    NSMutableAttributedString *copyrightText = [[NSMutableAttributedString alloc] initWithString:copyright
+        attributes:@{
+            NSFontAttributeName: [NSFont systemFontOfSize:11],
+            NSForegroundColorAttributeName: [NSColor tertiaryLabelColor],
+            NSParagraphStyleAttributeName: centered,
+        }];
+    NSRange holder = [copyright rangeOfString:kCopyrightHolder];
+
+    NSTextField *copyrightLabel = [NSTextField labelWithString:@""];
     copyrightLabel.alignment = NSTextAlignmentCenter;
-    copyrightLabel.frame = NSMakeRect(20, 36, W - 40, 16);
-    [content addSubview:copyrightLabel];
+    if (holder.location == NSNotFound) {
+        copyrightLabel.attributedStringValue = copyrightText;
+        copyrightLabel.frame = copyrightFrame;
+        [content addSubview:copyrightLabel];
+    } else {
+        [copyrightText addAttributes:@{
+            NSForegroundColorAttributeName: [NSColor linkColor],
+            NSLinkAttributeName: [NSURL URLWithString:kCopyrightHolderURL],
+        } range:holder];
+        copyrightLabel.selectable = YES;
+        copyrightLabel.allowsEditingTextAttributes = YES;
+        copyrightLabel.attributedStringValue = copyrightText;
+        copyrightLabel.frame = NSMakeRect(0, 0, copyrightFrame.size.width, copyrightFrame.size.height);
+
+        // Hand cursor over the holder's name only: the text is centered, so
+        // offset by half the slack plus the width of the text before it.
+        CGFloat fullWidth = copyrightText.size.width;
+        CGFloat prefixWidth = [copyrightText attributedSubstringFromRange:NSMakeRange(0, holder.location)].size.width;
+        CGFloat holderWidth = [copyrightText attributedSubstringFromRange:holder].size.width;
+        LinkCursorView *wrapper = [[LinkCursorView alloc] initWithFrame:copyrightFrame];
+        wrapper.linkRect = NSMakeRect(floor((copyrightFrame.size.width - fullWidth) / 2 + prefixWidth), 0,
+                                      ceil(holderWidth), copyrightFrame.size.height);
+        [wrapper addSubview:copyrightLabel];
+        [content addSubview:wrapper];
+    }
 
     return window;
 }
