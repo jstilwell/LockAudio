@@ -19,7 +19,7 @@
 
 // Copyright holder named in Info.plist's NSHumanReadableCopyright; the About
 // window links this part of the copyright line to the holder's site.
-static NSString* const kCopyrightHolder = @"Stilwe LLC";
+static NSString* const kCopyrightHolder = @"Jesse Stilwell";
 static NSString* const kCopyrightHolderURL = @"https://stilwe.com";
 
 // Per-direction preference keys (device, show/hide, pause, notify) live in
