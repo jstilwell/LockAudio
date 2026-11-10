@@ -57,7 +57,7 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
     AudioLock* outputLock;
     BOOL menuOpen;
     BOOL screenLocked;
-    // Shared listener block for all three CoreAudio property listeners.
+    // Shared listener block for all the CoreAudio property listeners.
     AudioObjectPropertyListenerBlock deviceChangeListener;
 }
 
@@ -183,6 +183,10 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
     for ( AudioLock *lock in self.locks )
     {
         [lock loadFromDefaults];
+        // A device that is already away at launch didn't just disconnect, so
+        // it gets no built-in fallback (which would override whatever the
+        // user picked before a relaunch or update).
+        lock.missingSince = [NSDate distantPast];
     }
 
     // Show our notifications as banners even while the About window is up.
@@ -202,8 +206,9 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
     menu.delegate = self;
     statusItem.menu = menu;
 
-    // Listen for changes to the default input and output devices, and for the
-    // device list itself changing (devices added/removed). CoreAudio delivers
+    // Listen for changes to the default input and output devices, for the
+    // device list itself changing (devices added/removed), and for the audio
+    // service restarting. CoreAudio delivers
     // these on the main queue. Enforcement is cheap, so it runs on every
     // notification with no coalescing delay: the sooner a stolen default is
     // put back, the shorter the audible glitch (e.g. AirPods dropping into
@@ -214,30 +219,31 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
         [weakSelf enforceLocks];
     };
 
-    AudioObjectPropertyAddress inputDeviceAddress = [inputLock defaultDeviceListenerAddress];
-    AudioObjectAddPropertyListenerBlock(
-        kAudioObjectSystemObject,
-        &inputDeviceAddress,
-        dispatch_get_main_queue(),
-        deviceChangeListener );
-
-    AudioObjectPropertyAddress outputDeviceAddress = [outputLock defaultDeviceListenerAddress];
-    AudioObjectAddPropertyListenerBlock(
-        kAudioObjectSystemObject,
-        &outputDeviceAddress,
-        dispatch_get_main_queue(),
-        deviceChangeListener );
-
-    AudioObjectPropertyAddress devicesChangedAddress = {
+    // kAudioHardwarePropertyServiceRestarted covers coreaudiod restarting: reads
+    // fail while it's down (enforceLocks waits), and this is the cue to resume.
+    const AudioObjectPropertySelector selectors[] = {
+        inputLock.defaultDeviceSelector,
+        outputLock.defaultDeviceSelector,
         kAudioHardwarePropertyDevices,
-        kAudioObjectPropertyScopeGlobal,
-        kAudioObjectPropertyElementMain
+        kAudioHardwarePropertyServiceRestarted,
     };
-    AudioObjectAddPropertyListenerBlock(
-        kAudioObjectSystemObject,
-        &devicesChangedAddress,
-        dispatch_get_main_queue(),
-        deviceChangeListener );
+    for ( size_t index = 0; index < sizeof( selectors ) / sizeof( selectors[0] ); index++ )
+    {
+        AudioObjectPropertyAddress address = {
+            selectors[index],
+            kAudioObjectPropertyScopeGlobal,
+            kAudioObjectPropertyElementMain
+        };
+        OSStatus status = AudioObjectAddPropertyListenerBlock(
+            kAudioObjectSystemObject,
+            &address,
+            dispatch_get_main_queue(),
+            deviceChangeListener );
+        if ( status != noErr )
+        {
+            LAError("adding CoreAudio listener %u failed: OSStatus %d", (unsigned int)selectors[index], (int)status );
+        }
+    }
 
     [ self enforceLocks ];
 }
@@ -342,7 +348,13 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
         return;
     }
 
-    AudioDeviceID currentID = [ lock currentDefaultDevice ];
+    AudioDeviceID currentID = kAudioDeviceUnknown;
+    if ( ![ lock readCurrentDefaultDevice : &currentID ] )
+    {
+        // Unreadable isn't "stolen": forcing here would also post a false
+        // notification. Wait for the next change.
+        return;
+    }
     LADebug("default %{public}@ device is %u" , dirName, currentID );
 
     if ( available )
@@ -366,7 +378,7 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
         if ( forceStatus == noErr )
         {
             lock.consecutiveForceFailures = 0;
-            [ self postForcedNotificationForLock : lock offendingName : offendingName ];
+            [ self postForcedNotificationForLock : lock offendingName : offendingName targetName : lock.forcedName ];
         }
         else
         {
@@ -376,31 +388,56 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
         // The property listener will fire for the change we just made and
         // re-run enforcement, which then finds nothing to do.
     }
-    else if ( lock.missingSince != nil
-              && -lock.missingSince.timeIntervalSinceNow <= kFallbackGraceInterval )
+    else if ( lock.hasSelection )
     {
-        // The forced device just disconnected. Don't leave the default to
-        // macOS, which can land on an arbitrary device (e.g. a RØDE that's both
-        // an input and output) instead of the built-in. Fall back to the
-        // built-in device — but only for a short grace period after the
-        // disconnect, so a device the user deliberately picks while the locked
-        // one is away isn't overridden. The saved selection is untouched, so the
-        // lock recovers the forced device the moment it reconnects.
-        AudioDeviceID builtInID = [ lock builtInDeviceInDevices : devices count : numberOfDevices ];
-
-        if ( builtInID != kAudioDeviceUnknown && currentID != builtInID )
+        // The forced device is away. Two cases put the built-in device in
+        // charge until it reconnects (the saved selection is untouched, so the
+        // lock recovers the moment it's back):
+        //  - It just disconnected. macOS's own pick can land on an arbitrary
+        //    device (e.g. a RØDE that's both an input and output), so fall
+        //    back — but only for a short grace period, so a device the user
+        //    deliberately picks afterwards isn't overridden.
+        //  - A Bluetooth mic took the input (AirPods connecting): the switch
+        //    this app exists to undo, however long the locked device has been
+        //    away. Any other device taking over is treated as the user's pick.
+        BOOL justDisconnected = lock.missingSince != nil
+                             && -lock.missingSince.timeIntervalSinceNow <= kFallbackGraceInterval;
+        BOOL bluetoothTookInput = lock.direction == AudioLockDirectionInput
+                               && [ lock isBluetoothDevice : currentID ];
+        if ( !justDisconnected && !bluetoothTookInput )
         {
-            LADebug("forced %{public}@ device '%{public}@' not connected; falling back to built-in %u",
-                   dirName, lock.forcedName, (unsigned int)builtInID );
+            return;
+        }
 
-            OSStatus forceStatus = [ lock applyForce : builtInID ];
-            if ( forceStatus != noErr )
-            {
-                LAError("fallback %{public}@ force failed: OSStatus %d", dirName, (int)forceStatus );
-            }
-            // No notification: a disconnect-driven fallback to built-in isn't the
-            // same event as another device stealing the lock, and notifying on
-            // every disconnect would be noisy.
+        AudioDeviceID builtInID = [ lock builtInDeviceInDevices : devices count : numberOfDevices ];
+        if ( builtInID == kAudioDeviceUnknown || currentID == builtInID )
+        {
+            return;
+        }
+
+        if ( ![ lock recordForceAttempt ] )
+        {
+            [ self handleContentionForLock : lock currentDevice : currentID ];
+            return;
+        }
+
+        LADebug("forced %{public}@ device '%{public}@' not connected; falling back to built-in %u",
+               dirName, lock.forcedName, (unsigned int)builtInID );
+
+        NSString *offendingName = [ lock nameForDevice : currentID ];
+        OSStatus forceStatus = [ lock applyForce : builtInID ];
+        if ( forceStatus != noErr )
+        {
+            LAError("fallback %{public}@ force failed: OSStatus %d", dirName, (int)forceStatus );
+        }
+        else if ( !justDisconnected )
+        {
+            // A Bluetooth mic was sent back: say so, since it may have been a
+            // manual pick. The disconnect fallback stays silent — it isn't
+            // another device stealing the lock, and would be noisy.
+            [ self postForcedNotificationForLock : lock
+                                   offendingName : offendingName
+                                      targetName : [ lock nameForDevice : builtInID ] ];
         }
     }
 }
@@ -411,6 +448,8 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
     if ( lock.consecutiveForceFailures >= kMaxForceRetries )
     {
         LAError("giving up on forcing %{public}@ until the next device change", lock.directionName );
+        // Start the next burst with a full set of retries.
+        lock.consecutiveForceFailures = 0;
         return;
     }
     lock.consecutiveForceFailures++;
@@ -770,6 +809,8 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
 {
     AudioLock *lock = [ self lockForDirection : item.representedObject ];
     lock.enabled = !lock.enabled;
+    // See applicationDidFinishLaunching: away-already isn't "just disconnected".
+    lock.missingSince = [ NSDate distantPast ];
     [ lock resetContention ];
     [ self enforceLocks ];
 }
@@ -978,6 +1019,7 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
 
 - (void)postForcedNotificationForLock:(AudioLock *)lock
                         offendingName:(NSString *)offendingName
+                           targetName:(NSString *)targetName
 {
     NSDate *now = [NSDate date];
 
@@ -994,7 +1036,7 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
     lock.lastNotificationTime = now;
 
     NSString *dirWord = lock.directionName;
-    NSString *forcedName = lock.forcedName ?: @"selected device";
+    NSString *forcedName = targetName ?: @"the selected device";
     NSString *body = [NSString stringWithFormat:@"%@ took the %@. LockAudio switched it back to %@.",
                       offendingName ?: @"Another device", dirWord, forcedName];
 

@@ -380,10 +380,10 @@ static const NSTimeInterval kContestedBackoff = 60.0;
 }
 
 
-- (AudioDeviceID)currentDefaultDevice
+- (BOOL)readCurrentDefaultDevice:(AudioDeviceID *)deviceID
 {
-    AudioDeviceID deviceID = kAudioDeviceUnknown;
-    UInt32 propertySize = sizeof(deviceID);
+    AudioDeviceID current = kAudioDeviceUnknown;
+    UInt32 propertySize = sizeof(current);
 
     AudioObjectPropertyAddress address = {
         self.defaultDeviceSelector,
@@ -391,20 +391,25 @@ static const NSTimeInterval kContestedBackoff = 60.0;
         kAudioObjectPropertyElementMain
     };
 
-    AudioObjectGetPropertyData(
+    OSStatus status = AudioObjectGetPropertyData(
         kAudioObjectSystemObject,
         &address,
         0,
         NULL,
         &propertySize,
-        &deviceID);
+        &current);
 
-    return deviceID;
+    if (status != noErr) {
+        LAError("readCurrentDefaultDevice: %{public}@ read failed (OSStatus %d)", self.directionName, (int)status);
+        return NO;
+    }
+
+    *deviceID = current;
+    return YES;
 }
 
-- (AudioDeviceID)builtInDeviceInDevices:(const AudioDeviceID *)devices
-
-                                  count:(int)numberOfDevices
+// 0 when the transport type can't be read.
+- (UInt32)transportTypeForDevice:(AudioDeviceID)deviceID
 {
     AudioObjectPropertyAddress transportAddress = {
         kAudioDevicePropertyTransportType,
@@ -412,6 +417,30 @@ static const NSTimeInterval kContestedBackoff = 60.0;
         kAudioObjectPropertyElementMain
     };
 
+    UInt32 transportType = 0;
+    UInt32 propertySize = sizeof(transportType);
+    OSStatus status = AudioObjectGetPropertyData(
+        deviceID,
+        &transportAddress,
+        0,
+        NULL,
+        &propertySize,
+        &transportType);
+
+    return status == noErr ? transportType : 0;
+}
+
+- (BOOL)isBluetoothDevice:(AudioDeviceID)deviceID
+{
+    UInt32 transportType = [self transportTypeForDevice:deviceID];
+    return transportType == kAudioDeviceTransportTypeBluetooth
+        || transportType == kAudioDeviceTransportTypeBluetoothLE;
+}
+
+- (AudioDeviceID)builtInDeviceInDevices:(const AudioDeviceID *)devices
+
+                                  count:(int)numberOfDevices
+{
     for ( int index = 0; index < numberOfDevices; index++ )
     {
         AudioDeviceID deviceID = devices[index];
@@ -424,17 +453,7 @@ static const NSTimeInterval kContestedBackoff = 60.0;
             continue;
         }
 
-        UInt32 transportType = 0;
-        UInt32 propertySize = sizeof(transportType);
-        OSStatus status = AudioObjectGetPropertyData(
-            deviceID,
-            &transportAddress,
-            0,
-            NULL,
-            &propertySize,
-            &transportType);
-
-        if ( status == noErr && transportType == kAudioDeviceTransportTypeBuiltIn )
+        if ( [self transportTypeForDevice:deviceID] == kAudioDeviceTransportTypeBuiltIn )
         {
             return deviceID;
         }
@@ -458,16 +477,6 @@ static const NSTimeInterval kContestedBackoff = 60.0;
         NULL,
         size,
         &deviceID);
-}
-
-- (AudioObjectPropertyAddress)defaultDeviceListenerAddress
-{
-    AudioObjectPropertyAddress address = {
-        self.defaultDeviceSelector,
-        kAudioObjectPropertyScopeGlobal,
-        kAudioObjectPropertyElementMain
-    };
-    return address;
 }
 
 // Resolves the forced device to a currently-connected AudioDeviceID that

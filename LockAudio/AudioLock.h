@@ -64,7 +64,9 @@ typedef NS_ENUM(NSUInteger, AudioLockStatus) {
 
 /// When the forced device was first seen missing (nil while it's connected).
 /// The built-in fallback only applies for a short grace period after this, so
-/// the user can pick another device while the locked one is away.
+/// the user can pick another device while the locked one is away. Starts as
+/// distantPast at launch and when the lock is switched on: a device that was
+/// already away then didn't "just disconnect".
 @property (nonatomic, strong, nullable) NSDate *missingSince;
 
 /// Notifications for this direction are suppressed until this time (set after
@@ -169,8 +171,12 @@ typedef NS_ENUM(NSUInteger, AudioLockStatus) {
 
 - (nullable NSString *)nameForDevice:(AudioDeviceID)deviceID;
 
-/// Reads the system's current default device for this direction.
-- (AudioDeviceID)currentDefaultDevice;
+/// Reads the system's current default device for this direction into
+/// `deviceID`. Returns NO (leaving it untouched) if CoreAudio can't be read.
+- (BOOL)readCurrentDefaultDevice:(AudioDeviceID *)deviceID;
+
+/// YES if `deviceID` connects over Bluetooth (AirPods and other headsets).
+- (BOOL)isBluetoothDevice:(AudioDeviceID)deviceID;
 
 /// Finds the built-in device (built-in speakers for output, built-in mic for
 /// input) among `devices` that participates in this direction, identified by
@@ -184,10 +190,6 @@ typedef NS_ENUM(NSUInteger, AudioLockStatus) {
 
 /// Sets the system's default device for this direction. Returns the OSStatus.
 - (OSStatus)applyForce:(AudioDeviceID)deviceID;
-
-/// The CoreAudio property address for this direction's default device, suitable
-/// for AudioObjectAddPropertyListener.
-- (AudioObjectPropertyAddress)defaultDeviceListenerAddress;
 
 @end
 
