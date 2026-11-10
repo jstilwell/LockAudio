@@ -35,6 +35,8 @@ PLIST_PATH="LockAudio/Info.plist"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 ENV_FILE="$PROJECT_DIR/.env"
+# Every path below is relative to the repo root.
+cd "$PROJECT_DIR"
 
 # Variables already in the environment take precedence over .env. With
 # 1Password Environments, .env is a FIFO that only serves approved processes,
@@ -61,6 +63,32 @@ done
 
 R2_ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
 APPCAST_PUBLIC_URL="${APPCAST_BASE_URL}/${R2_APPCAST_PATH}"
+
+# With --upload, check the publishing tools now rather than after a full build
+# and a notarization wait.
+if [ "$UPLOAD_TO_GITHUB" = true ]; then
+    if ! command -v gh &> /dev/null; then
+        echo -e "${RED}Error: GitHub CLI (gh) is not installed.${NC}"
+        echo "Install it with: brew install gh"
+        exit 1
+    fi
+    if ! gh auth status &> /dev/null; then
+        echo -e "${RED}Error: Not authenticated with GitHub CLI.${NC}"
+        echo "Run: gh auth login"
+        exit 1
+    fi
+    if ! command -v aws &> /dev/null; then
+        echo -e "${RED}Error: AWS CLI is not installed.${NC}"
+        echo "Install it with: brew install awscli"
+        echo "Then configure R2 profile: aws configure --profile r2"
+        exit 1
+    fi
+    if ! aws configure list --profile r2 &> /dev/null; then
+        echo -e "${RED}Error: AWS CLI profile 'r2' is not configured.${NC}"
+        echo "Configure it with: aws configure --profile r2"
+        exit 1
+    fi
+fi
 
 # Preflight: verify notarization credentials and Apple agreements before we
 # spend time building. A failure here means either the keychain profile is
@@ -235,9 +263,11 @@ DMG_NAME="LockAudio-${VERSION}.dmg"
 DMG_PATH="$RELEASE_DIR/$DMG_NAME"
 echo -e "${YELLOW}Creating DMG with Applications folder symlink: ${DMG_NAME}${NC}"
 
-# Create a temporary directory for DMG contents
-DMG_TEMP="dmg_temp"
-mkdir -p "$DMG_TEMP"
+# Stage the DMG contents in a fresh temp directory, removed however the script
+# exits. A fixed path left over from an interrupted run made `ln -s` below
+# follow the stale link and create /Applications/Applications.
+DMG_TEMP=$(mktemp -d)
+trap 'rm -rf "$DMG_TEMP"' EXIT
 
 # Copy app
 cp -R "$RELEASE_DIR/$APP_NAME" "$DMG_TEMP/"
@@ -257,9 +287,6 @@ else
         -ov -format UDZO \
         "$DMG_PATH"
 fi
-
-# Clean up temp directory
-rm -rf "$DMG_TEMP"
 
 # Code-sign the DMG itself (Apple's recommendation for distributed disk images;
 # notarization alone leaves the container unsigned). Use the same Developer ID
@@ -327,6 +354,11 @@ fi
 
 # Extract signature value
 ED_SIGNATURE=$(echo "$SIGNATURE" | grep -o 'sparkle:edSignature="[^"]*"' | cut -d'"' -f2)
+if [ -z "$ED_SIGNATURE" ]; then
+    echo -e "${RED}Error: no edSignature in sign_update output:${NC}"
+    echo "$SIGNATURE"
+    exit 1
+fi
 
 # Get file size
 FILE_SIZE=$(stat -f%z "$DMG_PATH")
@@ -347,19 +379,6 @@ echo -e "${YELLOW}Generating appcast.xml...${NC}"
 # Upload appcast.xml to R2
 upload_appcast_to_r2() {
     echo -e "${YELLOW}Uploading appcast.xml to Cloudflare R2...${NC}"
-
-    if ! command -v aws &> /dev/null; then
-        echo -e "${RED}Error: AWS CLI is not installed.${NC}"
-        echo "Install it with: brew install awscli"
-        echo "Then configure R2 profile: aws configure --profile r2"
-        return 1
-    fi
-
-    if ! aws configure list --profile r2 &> /dev/null 2>&1; then
-        echo -e "${RED}Error: AWS CLI profile 'r2' is not configured.${NC}"
-        echo "Configure it with: aws configure --profile r2"
-        return 1
-    fi
 
     aws s3 cp appcast.xml "s3://${R2_BUCKET}/${R2_APPCAST_PATH}" \
         --endpoint-url "$R2_ENDPOINT" \
@@ -428,20 +447,6 @@ echo ""
 if [ "$UPLOAD_TO_GITHUB" = true ]; then
 
     echo -e "${YELLOW}Uploading to GitHub...${NC}"
-
-    # Check if gh is installed
-    if ! command -v gh &> /dev/null; then
-        echo -e "${RED}Error: GitHub CLI (gh) is not installed.${NC}"
-        echo "Install it with: brew install gh"
-        exit 1
-    fi
-
-    # Check if authenticated
-    if ! gh auth status &> /dev/null; then
-        echo -e "${RED}Error: Not authenticated with GitHub CLI.${NC}"
-        echo "Run: gh auth login"
-        exit 1
-    fi
 
     # Create the release. Tag the commit that was actually built (--target):
     # without it gh tags the repo's default branch, which is wrong when

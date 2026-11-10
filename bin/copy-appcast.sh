@@ -32,6 +32,15 @@ if ! "$SIGN_UPDATE" --verify appcast.xml; then
     exit 1
 fi
 
+# The feed points at the GitHub release asset. Publishing before that exists
+# sends every client to a 404.
+DMG_URL=$(grep -o 'url="[^"]*"' appcast.xml | head -1 | cut -d'"' -f2)
+if ! curl -fsIL -o /dev/null "$DMG_URL"; then
+    echo "Error: the update download isn't live yet: ${DMG_URL:-<no enclosure url in appcast.xml>}"
+    echo "Create the GitHub release (with the DMG attached) first."
+    exit 1
+fi
+
 R2_ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
 
 aws s3 cp appcast.xml "s3://${R2_BUCKET}/${R2_APPCAST_PATH}" \
