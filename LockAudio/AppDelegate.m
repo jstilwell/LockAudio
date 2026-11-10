@@ -4,7 +4,7 @@
 #import <ServiceManagement/ServiceManagement.h>
 #import <UserNotifications/UserNotifications.h>
 
-// Per-direction preference keys (device, show/hide, pause, notify) live in
+// Per-direction preference keys (device, on/off, notify) live in
 // AudioLock. These are the app-wide ones.
 
 // Persisted launch-at-login state. The app's actual login-item registration
@@ -43,7 +43,7 @@ static const NSUInteger kMaxForceRetries = 3;
 // Overall state shown by the menu bar icon.
 typedef NS_ENUM(NSUInteger, StatusIconState) {
     StatusIconStateActive,
-    StatusIconStatePaused,
+    StatusIconStateOff,
     StatusIconStateAttention,
 };
 
@@ -180,13 +180,9 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
     inputLock = [[AudioLock alloc] initWithDirection:AudioLockDirectionInput];
     outputLock = [[AudioLock alloc] initWithDirection:AudioLockDirectionOutput];
 
-    // Runtime pause state = persisted pause preference OR section hidden. A
-    // hidden direction is always paused (so it doesn't force while hidden); a
-    // visible one reflects the user's saved pause choice. Both survive relaunch.
     for ( AudioLock *lock in self.locks )
     {
         [lock loadFromDefaults];
-        lock.paused = lock.pausePreference || !lock.showsOptions;
     }
 
     // Show our notifications as banners even while the About window is up.
@@ -247,9 +243,19 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
 }
 
 
+// The status item can be hidden (macOS drops it behind the notch on a crowded
+// menu bar), and there is no Dock icon or window. Opening the app again while
+// it's running shows the menu at the pointer, so it's always reachable.
+- ( BOOL ) applicationShouldHandleReopen : ( NSApplication* ) sender hasVisibleWindows : ( BOOL ) hasVisibleWindows
+{
+    [ menu popUpMenuPositioningItem : nil atLocation : [ NSEvent mouseLocation ] inView : nil ];
+    return NO;
+}
+
+
 #pragma mark - Enforcement
 
-// Re-resolves every shown lock's forced device and puts the default back where
+// Re-resolves every enabled lock's forced device and puts the default back where
 // it belongs, then refreshes the status icon (and the menu, if it's open).
 // Called from the CoreAudio listeners, on launch, and after any user action
 // that changes a lock.
@@ -270,7 +276,7 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
     for ( AudioLock *lock in self.locks )
     {
         [ lock invalidateDeviceCache ];
-        if ( lock.showsOptions )
+        if ( lock.enabled )
         {
             [ self enforceLock : lock devices : devices count : numberOfDevices ];
         }
@@ -331,7 +337,7 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
         lock.missingSince = [ NSDate date ];
     }
 
-    if ( lock.paused || lock.backingOff )
+    if ( lock.backingOff )
     {
         return;
     }
@@ -430,8 +436,8 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
                               kind : @"contested"
                              title : [ NSString stringWithFormat : @"%@ lock paused for a minute", lock.capitalizedDirectionName ]
                               body : [ NSString stringWithFormat :
-                                       @"Something keeps switching your %@ to %@, so LockAudio stopped switching it back. It will try again in a minute. To stop this, quit the other app or pause the lock.",
-                                       dirName, otherName ] ];
+                                       @"Something keeps switching your %@ to %@, so LockAudio stopped switching it back. It will try again in a minute. To stop this, quit the other app or turn off Lock %@.",
+                                       dirName, otherName, lock.capitalizedDirectionName ] ];
 
     NSTimeInterval delay = MAX( lock.backoffUntil.timeIntervalSinceNow, 0 ) + 0.1;
     __weak AppDelegate *weakSelf = self;
@@ -447,7 +453,6 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
 - ( void ) updateStatusItem
 {
     BOOL anyActive = NO;
-    BOOL anyPaused = NO;
     BOOL anyAttention = NO;
     NSMutableArray<NSString*> *lines = [ NSMutableArray arrayWithObject : @"LockAudio" ];
 
@@ -456,7 +461,7 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
         NSString *dir = lock.capitalizedDirectionName;
         switch ( lock.status )
         {
-            case AudioLockStatusHidden:
+            case AudioLockStatusOff:
                 break;
             case AudioLockStatusUnset:
                 [ lines addObject : [ NSString stringWithFormat : @"%@: no device chosen", dir ] ];
@@ -464,10 +469,6 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
             case AudioLockStatusActive:
                 anyActive = YES;
                 [ lines addObject : [ NSString stringWithFormat : @"%@ locked to %@", dir, lock.forcedName ?: @"selected device" ] ];
-                break;
-            case AudioLockStatusPaused:
-                anyPaused = YES;
-                [ lines addObject : [ NSString stringWithFormat : @"%@ lock paused", dir ] ];
                 break;
             case AudioLockStatusMissing:
                 anyAttention = YES;
@@ -480,11 +481,16 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
         }
     }
 
-    // Attention wins (the lock isn't holding), then paused, then active. With
-    // nothing shown or chosen nothing is enforced, which reads as paused.
+    if ( lines.count == 1 )
+    {
+        [ lines addObject : @"Both locks are off" ];
+    }
+
+    // Attention wins (a lock isn't holding), then active. With every lock off
+    // or without a device, nothing is enforced: the open-shackle icon.
     StatusIconState state = anyAttention ? StatusIconStateAttention
-                          : ( anyPaused || !anyActive ) ? StatusIconStatePaused
-                          : StatusIconStateActive;
+                          : anyActive ? StatusIconStateActive
+                          : StatusIconStateOff;
 
     statusItem.button.image = [ self statusImageForState : state ];
     statusItem.button.toolTip = [ lines componentsJoinedByString : @"\n" ];
@@ -501,9 +507,9 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
             name = @"status-active";
             description = @"LockAudio, locked";
             break;
-        case StatusIconStatePaused:
+        case StatusIconStateOff:
             name = @"status-paused";
-            description = @"LockAudio, paused";
+            description = @"LockAudio, not locking";
             break;
         case StatusIconStateAttention:
             name = @"status-attention";
@@ -580,14 +586,10 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
     const AudioDeviceID *devices = deviceData.bytes;
     int numberOfDevices = (int)( deviceData.length / sizeof( AudioDeviceID ) );
 
-    NSString *version = [ [ NSBundle mainBundle ] infoDictionary ][ @"CFBundleShortVersionString" ];
-    [ target addItemWithTitle : [ NSString stringWithFormat : @"Version %@", version ] action : nil keyEquivalent : @"" ];
-    [ target addItem : [ NSMenuItem separatorItem ] ];
-
     for ( AudioLock *lock in self.locks )
     {
         [ lock invalidateDeviceCache ];
-        if ( lock.showsOptions )
+        if ( lock.enabled )
         {
             [ self appendSectionForLock : lock toMenu : target devices : devices count : numberOfDevices ];
         }
@@ -602,21 +604,21 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
 
     for ( AudioLock *lock in self.locks )
     {
-        NSString *title = [ NSString stringWithFormat : @"Show %@ Options", lock.capitalizedDirectionName ];
+        NSString *title = [ NSString stringWithFormat : @"Lock %@", lock.capitalizedDirectionName ];
         NSString *symbol = ( lock.direction == AudioLockDirectionInput ) ? @"mic" : @"speaker.wave.2";
-        NSMenuItem *item = [ self addItemTo : target title : title action : @selector(toggleShowOptions:) symbol : symbol ];
+        NSMenuItem *item = [ self addItemTo : target title : title action : @selector(toggleLock:) symbol : symbol ];
         item.representedObject = @( lock.direction );
-        item.state = lock.showsOptions ? NSControlStateValueOn : NSControlStateValueOff;
+        item.state = lock.enabled ? NSControlStateValueOn : NSControlStateValueOff;
     }
 
-    // Notify toggles only appear when their section is shown.
+    // Notify toggles only appear for locks that are on.
     for ( AudioLock *lock in self.locks )
     {
-        if ( !lock.showsOptions )
+        if ( !lock.enabled )
         {
             continue;
         }
-        NSString *title = [ NSString stringWithFormat : @"Notify on Forced %@", lock.capitalizedDirectionName ];
+        NSString *title = [ NSString stringWithFormat : @"Notify When %@ Is Switched Back", lock.capitalizedDirectionName ];
         NSMenuItem *item = [ self addItemTo : target title : title action : @selector(toggleNotifications:) symbol : @"bell" ];
         item.representedObject = @( lock.direction );
         item.state = lock.notificationsEnabled ? NSControlStateValueOn : NSControlStateValueOff;
@@ -640,14 +642,14 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
 
 
 // Appends one direction's section: header, one row per participating device
-// (checkmark on the forced one), status rows, and the pause toggle.
+// (checkmark on the locked one), and status rows.
 - ( void ) appendSectionForLock : ( AudioLock* ) lock
                          toMenu : ( NSMenu* ) targetMenu
                         devices : ( const AudioDeviceID* ) devices
                           count : ( int ) numberOfDevices
 {
     NSString *dirName = lock.directionName;
-    [ targetMenu addItem : [ self sectionHeaderWithTitle : [ NSString stringWithFormat : @"Forced %@", lock.capitalizedDirectionName ] ] ];
+    [ targetMenu addItem : [ self sectionHeaderWithTitle : [ NSString stringWithFormat : @"Lock %@ To", lock.capitalizedDirectionName ] ] ];
 
     BOOL listedForced = NO;
 
@@ -708,11 +710,6 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
         [ targetMenu addItemWithTitle : @"Another app keeps changing it; retrying soon" action : NULL keyEquivalent : @"" ];
     }
 
-    NSString *pauseTitle = [ NSString stringWithFormat : @"Pause %@ Lock", lock.capitalizedDirectionName ];
-    NSMenuItem *pauseItem = [ self addItemTo : targetMenu title : pauseTitle action : @selector(togglePause:) symbol : @"pause.circle" ];
-    pauseItem.representedObject = @( lock.direction );
-    pauseItem.state = lock.paused ? NSControlStateValueOn : NSControlStateValueOff;
-
     [ targetMenu addItem : [ NSMenuItem separatorItem ] ];
 }
 
@@ -767,27 +764,12 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
 }
 
 
-- ( void ) togglePause : ( NSMenuItem* ) item
+// Switches a direction's lock on or off. Off removes its section from the menu
+// and stops enforcing; the chosen device stays saved for when it's back on.
+- ( void ) toggleLock : ( NSMenuItem* ) item
 {
     AudioLock *lock = [ self lockForDirection : item.representedObject ];
-    lock.paused = !lock.paused;
-    // Persist the user's pause preference (the section is visible here).
-    lock.pausePreference = lock.paused;
-    [ lock resetContention ];
-    [ self enforceLocks ];
-}
-
-
-// Show/hide a direction's options. Hiding removes the section from the menu and
-// force-pauses the lock so it stops forcing — but leaves the persisted pause
-// *preference* untouched. Showing restores the lock to that preference. Both the
-// show flag and the pause preference persist across launches.
-- ( void ) toggleShowOptions : ( NSMenuItem* ) item
-{
-    AudioLock *lock = [ self lockForDirection : item.representedObject ];
-    BOOL show = !lock.showsOptions;
-    lock.showsOptions = show;
-    lock.paused = show ? lock.pausePreference : YES;
+    lock.enabled = !lock.enabled;
     [ lock resetContention ];
     [ self enforceLocks ];
 }
@@ -1013,13 +995,12 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
 
     NSString *dirWord = lock.directionName;
     NSString *forcedName = lock.forcedName ?: @"selected device";
-    NSString *body = (offendingName != nil)
-        ? [NSString stringWithFormat:@"%@ took %@ control. Forced %@ back to %@.", offendingName, dirWord, dirWord, forcedName]
-        : [NSString stringWithFormat:@"Another device took %@ control. Forced %@ back to %@.", dirWord, dirWord, forcedName];
+    NSString *body = [NSString stringWithFormat:@"%@ took the %@. LockAudio switched it back to %@.",
+                      offendingName ?: @"Another device", dirWord, forcedName];
 
     [self postNotificationForLock:lock
                              kind:@"forced"
-                            title:[NSString stringWithFormat:@"Forced %@ active", dirWord]
+                            title:[NSString stringWithFormat:@"%@ switched back", lock.capitalizedDirectionName]
                              body:body];
 }
 

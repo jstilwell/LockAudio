@@ -30,10 +30,9 @@ typedef NS_ENUM(NSUInteger, AudioLockDirection) {
 
 /// What a lock is doing right now, for the status item icon/tooltip and menu.
 typedef NS_ENUM(NSUInteger, AudioLockStatus) {
-    AudioLockStatusHidden,     // Section hidden in the menu; not enforcing.
-    AudioLockStatusUnset,      // Shown, but no device chosen yet (output default).
+    AudioLockStatusOff,        // Switched off: no section in the menu, not enforcing.
+    AudioLockStatusUnset,      // On, but no device chosen yet (output default).
     AudioLockStatusActive,     // Enforcing; the forced device is connected.
-    AudioLockStatusPaused,     // Shown, paused by the user.
     AudioLockStatusMissing,    // The forced device isn't connected.
     AudioLockStatusContested,  // Backing off: another app keeps changing it.
 };
@@ -58,11 +57,6 @@ typedef NS_ENUM(NSUInteger, AudioLockStatus) {
 /// and does not change across disconnect/reconnect, so it is the primary key
 /// used to recover the AudioDeviceID (which *does* change).
 @property (nonatomic, copy, nullable) NSString *forcedUID;
-
-/// When YES, forcing is temporarily disabled for this direction. This is the
-/// runtime state; the persisted pause *preference* lives in NSUserDefaults
-/// (AppDelegate owns it, since it interacts with the show/hide toggles).
-@property (nonatomic) BOOL paused;
 
 /// YES while the forced device was found among the connected devices on the
 /// last `resolveForcedDeviceInDevices:count:`.
@@ -98,12 +92,10 @@ typedef NS_ENUM(NSUInteger, AudioLockStatus) {
 /// "Input" / "Output", for titles.
 @property (nonatomic, readonly) NSString *capitalizedDirectionName;
 
-/// Persisted: whether this direction's section is shown in the menu.
-@property (nonatomic) BOOL showsOptions;
-
-/// Persisted: the user's pause *preference* for a visible section. The runtime
-/// `paused` is this OR hidden.
-@property (nonatomic) BOOL pausePreference;
+/// Persisted: whether this lock is switched on. Off removes its section from
+/// the menu and stops enforcing; the chosen device stays saved. Stored under
+/// the pre-2.2 "Show…Options" key, which already meant this.
+@property (nonatomic) BOOL enabled;
 
 /// Persisted: whether to post a notification when the lock forces back.
 @property (nonatomic) BOOL notificationsEnabled;
@@ -125,7 +117,7 @@ typedef NS_ENUM(NSUInteger, AudioLockStatus) {
 /// YES while `backoffUntil` is in the future.
 @property (nonatomic, readonly, getter=isBackingOff) BOOL backingOff;
 
-/// Clears contention state (on a user-initiated switch or pause toggle).
+/// Clears contention state (on a user-initiated switch or lock toggle).
 - (void)resetContention;
 
 /// Resolves the forced device to a currently-connected AudioDeviceID that

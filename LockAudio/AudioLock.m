@@ -21,7 +21,10 @@ static NSString* const kPrefInputDevice = @"Device";
 static NSString* const kPrefInputDeviceName = @"DeviceName";
 static NSString* const kPrefInputDeviceUID = @"DeviceUID";
 static NSString* const kPrefInputNotificationsEnabled = @"NotificationsEnabled";
+// "ShowInputOptions" / "ShowOutputOptions" hold whether the lock is on; the
+// names are from when the same switch was labelled "Show … Options".
 static NSString* const kPrefShowInputOptions = @"ShowInputOptions";
+// Pre-2.2 pause flags, only read to migrate them (see loadFromDefaults).
 static NSString* const kPrefInputPaused = @"InputPaused";
 
 static NSString* const kPrefOutputDevice = @"OutputDevice";
@@ -45,7 +48,7 @@ static const NSTimeInterval kContestedBackoff = 60.0;
     NSString *_defaultsNameKey;
     NSString *_defaultsUIDKey;
     NSString *_notificationsKey;
-    NSString *_showOptionsKey;
+    NSString *_enabledKey;
     NSString *_pausedKey;
     NSMutableDictionary<NSNumber *, NSNumber *> *_participationCache;
     NSMutableArray<NSDate *> *_recentForces;
@@ -62,12 +65,11 @@ static const NSTimeInterval kContestedBackoff = 60.0;
         _defaultsNameKey = isInput ? kPrefInputDeviceName : kPrefOutputDeviceName;
         _defaultsUIDKey = isInput ? kPrefInputDeviceUID : kPrefOutputDeviceUID;
         _notificationsKey = isInput ? kPrefInputNotificationsEnabled : kPrefOutputNotificationsEnabled;
-        _showOptionsKey = isInput ? kPrefShowInputOptions : kPrefShowOutputOptions;
+        _enabledKey = isInput ? kPrefShowInputOptions : kPrefShowOutputOptions;
         _pausedKey = isInput ? kPrefInputPaused : kPrefOutputPaused;
         _forcedID = UINT32_MAX;
         _forcedName = nil;
         _forcedUID = nil;
-        _paused = NO;
         _participationCache = [NSMutableDictionary dictionary];
         _recentForces = [NSMutableArray array];
     }
@@ -81,12 +83,10 @@ static const NSTimeInterval kContestedBackoff = 60.0;
         // device is forced until the user chooses one.
         kPrefInputNotificationsEnabled: @YES,
         kPrefOutputNotificationsEnabled: @NO,
-        // Input options shown by default (common case); output options hidden
-        // by default (rare case — users opt in via "Show Output Options").
+        // The input lock is on by default (common case); the output lock is
+        // off by default (users opt in via "Lock Output").
         kPrefShowInputOptions: @YES,
         kPrefShowOutputOptions: @NO,
-        kPrefInputPaused: @NO,
-        kPrefOutputPaused: @NO,
     }];
 }
 
@@ -100,24 +100,14 @@ static const NSTimeInterval kContestedBackoff = 60.0;
     return _direction == AudioLockDirectionInput ? @"Input" : @"Output";
 }
 
-- (BOOL)showsOptions
+- (BOOL)enabled
 {
-    return [[NSUserDefaults standardUserDefaults] boolForKey:_showOptionsKey];
+    return [[NSUserDefaults standardUserDefaults] boolForKey:_enabledKey];
 }
 
-- (void)setShowsOptions:(BOOL)showsOptions
+- (void)setEnabled:(BOOL)enabled
 {
-    [[NSUserDefaults standardUserDefaults] setBool:showsOptions forKey:_showOptionsKey];
-}
-
-- (BOOL)pausePreference
-{
-    return [[NSUserDefaults standardUserDefaults] boolForKey:_pausedKey];
-}
-
-- (void)setPausePreference:(BOOL)pausePreference
-{
-    [[NSUserDefaults standardUserDefaults] setBool:pausePreference forKey:_pausedKey];
+    [[NSUserDefaults standardUserDefaults] setBool:enabled forKey:_enabledKey];
 }
 
 - (BOOL)notificationsEnabled
@@ -137,11 +127,8 @@ static const NSTimeInterval kContestedBackoff = 60.0;
 
 - (AudioLockStatus)status
 {
-    if (!self.showsOptions) {
-        return AudioLockStatusHidden;
-    }
-    if (_paused) {
-        return AudioLockStatusPaused;
+    if (!self.enabled) {
+        return AudioLockStatusOff;
     }
     if (!self.hasSelection) {
         return AudioLockStatusUnset;
@@ -248,6 +235,13 @@ static const NSTimeInterval kContestedBackoff = 60.0;
 - (void)loadFromDefaults
 {
     NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
+
+    // Before 2.2 a lock could be shown but paused. There is one switch now, so
+    // a paused lock becomes an off lock instead of silently starting to enforce.
+    if ([prefs boolForKey:_pausedKey]) {
+        self.enabled = NO;
+    }
+    [prefs removeObjectForKey:_pausedKey];
 
     NSInteger savedId = [prefs integerForKey:_defaultsKey];
 
