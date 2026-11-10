@@ -30,10 +30,9 @@ typedef NS_ENUM(NSUInteger, AudioLockDirection) {
 
 /// What a lock is doing right now, for the status item icon/tooltip and menu.
 typedef NS_ENUM(NSUInteger, AudioLockStatus) {
-    AudioLockStatusHidden,     // Section hidden in the menu; not enforcing.
-    AudioLockStatusUnset,      // Shown, but no device chosen yet (output default).
+    AudioLockStatusOff,        // Switched off: no section in the menu, not enforcing.
+    AudioLockStatusUnset,      // On, but no device chosen yet (output default).
     AudioLockStatusActive,     // Enforcing; the forced device is connected.
-    AudioLockStatusPaused,     // Shown, paused by the user.
     AudioLockStatusMissing,    // The forced device isn't connected.
     AudioLockStatusContested,  // Backing off: another app keeps changing it.
 };
@@ -59,18 +58,15 @@ typedef NS_ENUM(NSUInteger, AudioLockStatus) {
 /// used to recover the AudioDeviceID (which *does* change).
 @property (nonatomic, copy, nullable) NSString *forcedUID;
 
-/// When YES, forcing is temporarily disabled for this direction. This is the
-/// runtime state; the persisted pause *preference* lives in NSUserDefaults
-/// (AppDelegate owns it, since it interacts with the show/hide toggles).
-@property (nonatomic) BOOL paused;
-
 /// YES while the forced device was found among the connected devices on the
 /// last `resolveForcedDeviceInDevices:count:`.
 @property (nonatomic) BOOL forcedDeviceAvailable;
 
 /// When the forced device was first seen missing (nil while it's connected).
 /// The built-in fallback only applies for a short grace period after this, so
-/// the user can pick another device while the locked one is away.
+/// the user can pick another device while the locked one is away. Starts as
+/// distantPast at launch and when the lock is switched on: a device that was
+/// already away then didn't "just disconnect".
 @property (nonatomic, strong, nullable) NSDate *missingSince;
 
 /// Notifications for this direction are suppressed until this time (set after
@@ -98,12 +94,10 @@ typedef NS_ENUM(NSUInteger, AudioLockStatus) {
 /// "Input" / "Output", for titles.
 @property (nonatomic, readonly) NSString *capitalizedDirectionName;
 
-/// Persisted: whether this direction's section is shown in the menu.
-@property (nonatomic) BOOL showsOptions;
-
-/// Persisted: the user's pause *preference* for a visible section. The runtime
-/// `paused` is this OR hidden.
-@property (nonatomic) BOOL pausePreference;
+/// Persisted: whether this lock is switched on. Off removes its section from
+/// the menu and stops enforcing; the chosen device stays saved. Stored under
+/// the pre-2.2 "Show…Options" key, which already meant this.
+@property (nonatomic) BOOL enabled;
 
 /// Persisted: whether to post a notification when the lock forces back.
 @property (nonatomic) BOOL notificationsEnabled;
@@ -125,7 +119,7 @@ typedef NS_ENUM(NSUInteger, AudioLockStatus) {
 /// YES while `backoffUntil` is in the future.
 @property (nonatomic, readonly, getter=isBackingOff) BOOL backingOff;
 
-/// Clears contention state (on a user-initiated switch or pause toggle).
+/// Clears contention state (on a user-initiated switch or lock toggle).
 - (void)resetContention;
 
 /// Resolves the forced device to a currently-connected AudioDeviceID that
@@ -177,8 +171,12 @@ typedef NS_ENUM(NSUInteger, AudioLockStatus) {
 
 - (nullable NSString *)nameForDevice:(AudioDeviceID)deviceID;
 
-/// Reads the system's current default device for this direction.
-- (AudioDeviceID)currentDefaultDevice;
+/// Reads the system's current default device for this direction into
+/// `deviceID`. Returns NO (leaving it untouched) if CoreAudio can't be read.
+- (BOOL)readCurrentDefaultDevice:(AudioDeviceID *)deviceID;
+
+/// YES if `deviceID` connects over Bluetooth (AirPods and other headsets).
+- (BOOL)isBluetoothDevice:(AudioDeviceID)deviceID;
 
 /// Finds the built-in device (built-in speakers for output, built-in mic for
 /// input) among `devices` that participates in this direction, identified by
@@ -192,10 +190,6 @@ typedef NS_ENUM(NSUInteger, AudioLockStatus) {
 
 /// Sets the system's default device for this direction. Returns the OSStatus.
 - (OSStatus)applyForce:(AudioDeviceID)deviceID;
-
-/// The CoreAudio property address for this direction's default device, suitable
-/// for AudioObjectAddPropertyListener.
-- (AudioObjectPropertyAddress)defaultDeviceListenerAddress;
 
 @end
 

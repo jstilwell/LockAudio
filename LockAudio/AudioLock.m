@@ -21,7 +21,10 @@ static NSString* const kPrefInputDevice = @"Device";
 static NSString* const kPrefInputDeviceName = @"DeviceName";
 static NSString* const kPrefInputDeviceUID = @"DeviceUID";
 static NSString* const kPrefInputNotificationsEnabled = @"NotificationsEnabled";
+// "ShowInputOptions" / "ShowOutputOptions" hold whether the lock is on; the
+// names are from when the same switch was labelled "Show … Options".
 static NSString* const kPrefShowInputOptions = @"ShowInputOptions";
+// Pre-2.2 pause flags, only read to migrate them (see loadFromDefaults).
 static NSString* const kPrefInputPaused = @"InputPaused";
 
 static NSString* const kPrefOutputDevice = @"OutputDevice";
@@ -45,7 +48,7 @@ static const NSTimeInterval kContestedBackoff = 60.0;
     NSString *_defaultsNameKey;
     NSString *_defaultsUIDKey;
     NSString *_notificationsKey;
-    NSString *_showOptionsKey;
+    NSString *_enabledKey;
     NSString *_pausedKey;
     NSMutableDictionary<NSNumber *, NSNumber *> *_participationCache;
     NSMutableArray<NSDate *> *_recentForces;
@@ -62,12 +65,11 @@ static const NSTimeInterval kContestedBackoff = 60.0;
         _defaultsNameKey = isInput ? kPrefInputDeviceName : kPrefOutputDeviceName;
         _defaultsUIDKey = isInput ? kPrefInputDeviceUID : kPrefOutputDeviceUID;
         _notificationsKey = isInput ? kPrefInputNotificationsEnabled : kPrefOutputNotificationsEnabled;
-        _showOptionsKey = isInput ? kPrefShowInputOptions : kPrefShowOutputOptions;
+        _enabledKey = isInput ? kPrefShowInputOptions : kPrefShowOutputOptions;
         _pausedKey = isInput ? kPrefInputPaused : kPrefOutputPaused;
         _forcedID = UINT32_MAX;
         _forcedName = nil;
         _forcedUID = nil;
-        _paused = NO;
         _participationCache = [NSMutableDictionary dictionary];
         _recentForces = [NSMutableArray array];
     }
@@ -81,12 +83,10 @@ static const NSTimeInterval kContestedBackoff = 60.0;
         // device is forced until the user chooses one.
         kPrefInputNotificationsEnabled: @YES,
         kPrefOutputNotificationsEnabled: @NO,
-        // Input options shown by default (common case); output options hidden
-        // by default (rare case — users opt in via "Show Output Options").
+        // The input lock is on by default (common case); the output lock is
+        // off by default (users opt in via "Lock Output").
         kPrefShowInputOptions: @YES,
         kPrefShowOutputOptions: @NO,
-        kPrefInputPaused: @NO,
-        kPrefOutputPaused: @NO,
     }];
 }
 
@@ -100,24 +100,14 @@ static const NSTimeInterval kContestedBackoff = 60.0;
     return _direction == AudioLockDirectionInput ? @"Input" : @"Output";
 }
 
-- (BOOL)showsOptions
+- (BOOL)enabled
 {
-    return [[NSUserDefaults standardUserDefaults] boolForKey:_showOptionsKey];
+    return [[NSUserDefaults standardUserDefaults] boolForKey:_enabledKey];
 }
 
-- (void)setShowsOptions:(BOOL)showsOptions
+- (void)setEnabled:(BOOL)enabled
 {
-    [[NSUserDefaults standardUserDefaults] setBool:showsOptions forKey:_showOptionsKey];
-}
-
-- (BOOL)pausePreference
-{
-    return [[NSUserDefaults standardUserDefaults] boolForKey:_pausedKey];
-}
-
-- (void)setPausePreference:(BOOL)pausePreference
-{
-    [[NSUserDefaults standardUserDefaults] setBool:pausePreference forKey:_pausedKey];
+    [[NSUserDefaults standardUserDefaults] setBool:enabled forKey:_enabledKey];
 }
 
 - (BOOL)notificationsEnabled
@@ -137,11 +127,8 @@ static const NSTimeInterval kContestedBackoff = 60.0;
 
 - (AudioLockStatus)status
 {
-    if (!self.showsOptions) {
-        return AudioLockStatusHidden;
-    }
-    if (_paused) {
-        return AudioLockStatusPaused;
+    if (!self.enabled) {
+        return AudioLockStatusOff;
     }
     if (!self.hasSelection) {
         return AudioLockStatusUnset;
@@ -248,6 +235,13 @@ static const NSTimeInterval kContestedBackoff = 60.0;
 - (void)loadFromDefaults
 {
     NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
+
+    // Before 2.2 a lock could be shown but paused. There is one switch now, so
+    // a paused lock becomes an off lock instead of silently starting to enforce.
+    if ([prefs boolForKey:_pausedKey]) {
+        self.enabled = NO;
+    }
+    [prefs removeObjectForKey:_pausedKey];
 
     NSInteger savedId = [prefs integerForKey:_defaultsKey];
 
@@ -386,10 +380,10 @@ static const NSTimeInterval kContestedBackoff = 60.0;
 }
 
 
-- (AudioDeviceID)currentDefaultDevice
+- (BOOL)readCurrentDefaultDevice:(AudioDeviceID *)deviceID
 {
-    AudioDeviceID deviceID = kAudioDeviceUnknown;
-    UInt32 propertySize = sizeof(deviceID);
+    AudioDeviceID current = kAudioDeviceUnknown;
+    UInt32 propertySize = sizeof(current);
 
     AudioObjectPropertyAddress address = {
         self.defaultDeviceSelector,
@@ -397,20 +391,25 @@ static const NSTimeInterval kContestedBackoff = 60.0;
         kAudioObjectPropertyElementMain
     };
 
-    AudioObjectGetPropertyData(
+    OSStatus status = AudioObjectGetPropertyData(
         kAudioObjectSystemObject,
         &address,
         0,
         NULL,
         &propertySize,
-        &deviceID);
+        &current);
 
-    return deviceID;
+    if (status != noErr) {
+        LAError("readCurrentDefaultDevice: %{public}@ read failed (OSStatus %d)", self.directionName, (int)status);
+        return NO;
+    }
+
+    *deviceID = current;
+    return YES;
 }
 
-- (AudioDeviceID)builtInDeviceInDevices:(const AudioDeviceID *)devices
-
-                                  count:(int)numberOfDevices
+// 0 when the transport type can't be read.
+- (UInt32)transportTypeForDevice:(AudioDeviceID)deviceID
 {
     AudioObjectPropertyAddress transportAddress = {
         kAudioDevicePropertyTransportType,
@@ -418,6 +417,30 @@ static const NSTimeInterval kContestedBackoff = 60.0;
         kAudioObjectPropertyElementMain
     };
 
+    UInt32 transportType = 0;
+    UInt32 propertySize = sizeof(transportType);
+    OSStatus status = AudioObjectGetPropertyData(
+        deviceID,
+        &transportAddress,
+        0,
+        NULL,
+        &propertySize,
+        &transportType);
+
+    return status == noErr ? transportType : 0;
+}
+
+- (BOOL)isBluetoothDevice:(AudioDeviceID)deviceID
+{
+    UInt32 transportType = [self transportTypeForDevice:deviceID];
+    return transportType == kAudioDeviceTransportTypeBluetooth
+        || transportType == kAudioDeviceTransportTypeBluetoothLE;
+}
+
+- (AudioDeviceID)builtInDeviceInDevices:(const AudioDeviceID *)devices
+
+                                  count:(int)numberOfDevices
+{
     for ( int index = 0; index < numberOfDevices; index++ )
     {
         AudioDeviceID deviceID = devices[index];
@@ -430,17 +453,7 @@ static const NSTimeInterval kContestedBackoff = 60.0;
             continue;
         }
 
-        UInt32 transportType = 0;
-        UInt32 propertySize = sizeof(transportType);
-        OSStatus status = AudioObjectGetPropertyData(
-            deviceID,
-            &transportAddress,
-            0,
-            NULL,
-            &propertySize,
-            &transportType);
-
-        if ( status == noErr && transportType == kAudioDeviceTransportTypeBuiltIn )
+        if ( [self transportTypeForDevice:deviceID] == kAudioDeviceTransportTypeBuiltIn )
         {
             return deviceID;
         }
@@ -464,16 +477,6 @@ static const NSTimeInterval kContestedBackoff = 60.0;
         NULL,
         size,
         &deviceID);
-}
-
-- (AudioObjectPropertyAddress)defaultDeviceListenerAddress
-{
-    AudioObjectPropertyAddress address = {
-        self.defaultDeviceSelector,
-        kAudioObjectPropertyScopeGlobal,
-        kAudioObjectPropertyElementMain
-    };
-    return address;
 }
 
 // Resolves the forced device to a currently-connected AudioDeviceID that

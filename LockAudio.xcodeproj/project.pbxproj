@@ -12,9 +12,6 @@
 		3333F8A9219874D600816A9F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 3333F8A8219874D600816A9F /* Assets.xcassets */; };
 		3333F8AC219874D600816A9F /* MainMenu.xib in Resources */ = {isa = PBXBuildFile; fileRef = 3333F8AA219874D600816A9F /* MainMenu.xib */; };
 		3333F8AF219874D600816A9F /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = 3333F8AE219874D600816A9F /* main.m */; };
-		335B96772199C07000F6D77B /* LICENSE in Resources */ = {isa = PBXBuildFile; fileRef = 335B96742199C07000F6D77B /* LICENSE */; };
-		335B96782199C07000F6D77B /* GBLaunchAtLogin.m in Sources */ = {isa = PBXBuildFile; fileRef = 335B96752199C07000F6D77B /* GBLaunchAtLogin.m */; };
-		335B96792199C07000F6D77B /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = 335B96762199C07000F6D77B /* README.md */; };
 		88CCA3E62E8C94FA0034FB1C /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 88CCA3E52E8C94FA0034FB1C /* Sparkle */; };
 /* End PBXBuildFile section */
 
@@ -29,10 +26,6 @@
 		3333F8AD219874D600816A9F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		3333F8AE219874D600816A9F /* main.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = main.m; sourceTree = "<group>"; };
 		3333F8BB2198771700816A9F /* CoreAudio.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreAudio.framework; path = System/Library/Frameworks/CoreAudio.framework; sourceTree = SDKROOT; };
-		335B96732199C07000F6D77B /* GBLaunchAtLogin.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = GBLaunchAtLogin.h; sourceTree = "<group>"; };
-		335B96742199C07000F6D77B /* LICENSE */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = LICENSE; sourceTree = "<group>"; };
-		335B96752199C07000F6D77B /* GBLaunchAtLogin.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = GBLaunchAtLogin.m; sourceTree = "<group>"; };
-		335B96762199C07000F6D77B /* README.md */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		335B967A2199C25A00F6D77B /* LICENSE */ = {isa = PBXFileReference; lastKnownFileType = text; path = LICENSE; sourceTree = SOURCE_ROOT; };
 		335B967B2199C25A00F6D77B /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
@@ -86,21 +79,9 @@
 		3333F8BA2198771700816A9F /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
-				335B96722199C07000F6D77B /* GBLaunchAtLogin */,
 				3333F8BB2198771700816A9F /* CoreAudio.framework */,
 			);
 			name = Frameworks;
-			sourceTree = "<group>";
-		};
-		335B96722199C07000F6D77B /* GBLaunchAtLogin */ = {
-			isa = PBXGroup;
-			children = (
-				335B96732199C07000F6D77B /* GBLaunchAtLogin.h */,
-				335B96742199C07000F6D77B /* LICENSE */,
-				335B96752199C07000F6D77B /* GBLaunchAtLogin.m */,
-				335B96762199C07000F6D77B /* README.md */,
-			);
-			path = GBLaunchAtLogin;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -169,10 +150,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				335B96792199C07000F6D77B /* README.md in Resources */,
 				3333F8A9219874D600816A9F /* Assets.xcassets in Resources */,
 				3333F8AC219874D600816A9F /* MainMenu.xib in Resources */,
-				335B96772199C07000F6D77B /* LICENSE in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -183,7 +162,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				335B96782199C07000F6D77B /* GBLaunchAtLogin.m in Sources */,
 				3333F8AF219874D600816A9F /* main.m in Sources */,
 				3333F8A7219874D300816A9F /* AppDelegate.m in Sources */,
 				5F15B4F1E0644EBABCC959C3 /* AudioLock.m in Sources */,

@@ -53,7 +53,7 @@ echo -e "${YELLOW}Launching...${NC}"
 open "$APP_PATH"
 
 echo
-echo -e "${GREEN}Running.${NC} Watch the menu bar for the AirPods icon."
+echo -e "${GREEN}Running.${NC} Watch the menu bar for the padlock icon."
 echo
 echo "Live logs (Ctrl+C to stop tailing — the app keeps running):"
 echo "---"
