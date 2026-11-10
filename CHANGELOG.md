@@ -2,10 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
-## 2.1.2 - Unreleased
+## 2.2.0 - Unreleased
+
+### Added
+
+- Opening LockAudio again while it is running now shows its menu at the pointer, so you can still reach it when macOS hides the menu bar icon (for example behind the notch on a full menu bar).
+- While your locked input device is disconnected, AirPods or another Bluetooth headset can no longer take over the microphone. LockAudio switches the input back to the built-in mic and tells you. A device you pick that isn't Bluetooth is still left alone.
+
+### Fixed
+
+- Starting or updating LockAudio while your locked device is disconnected no longer switches you to the built-in device.
+- A switch that keeps failing (for example while a device is still settling) is retried properly every time, not just the first time.
+- No more false notification that another device took over when macOS briefly can't report the current device.
+- The lock picks up again after the macOS audio service restarts.
 
 ### Changed
 
+- Each lock now has one switch, "Lock Input" and "Lock Output". They replace "Show Input Options", "Show Output Options" and the separate pause items, which did nearly the same thing in two places. Turning a lock off keeps your chosen device for when you turn it back on. A lock you had paused is now off.
+- Plainer wording: the menu and notifications say "lock" and "switched back" instead of "forced".
+- The version number moved out of the menu. It is still in About LockAudio, which is now the standard macOS About window.
 - The copyright holder is Jesse Stilwell, and the app no longer says "All rights reserved", which didn't fit the MIT license.
 
 ## 2.1.1 - 10-11-2026
