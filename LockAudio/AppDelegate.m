@@ -1,32 +1,14 @@
 #import "AppDelegate.h"
-#import "GBLaunchAtLogin.h"
 #import "AudioLock.h"
 #import <CoreAudio/CoreAudio.h>
+#import <ServiceManagement/ServiceManagement.h>
 #import <UserNotifications/UserNotifications.h>
-
-@interface LinkCursorView : NSView
-// Area that shows the pointing-hand cursor; empty means the whole view.
-@property (nonatomic) NSRect linkRect;
-@end
-
-@implementation LinkCursorView
-- (void)resetCursorRects
-{
-    NSRect rect = NSIsEmptyRect(self.linkRect) ? self.bounds : self.linkRect;
-    [self addCursorRect:rect cursor:[NSCursor pointingHandCursor]];
-}
-@end
-
-// Copyright holder named in Info.plist's NSHumanReadableCopyright; the About
-// window links this part of the copyright line to the holder's site.
-static NSString* const kCopyrightHolder = @"Jesse Stilwell";
-static NSString* const kCopyrightHolderURL = @"https://stilwe.com";
 
 // Per-direction preference keys (device, show/hide, pause, notify) live in
 // AudioLock. These are the app-wide ones.
 
 // Persisted launch-at-login state. The app's actual login-item registration
-// lives in SMAppService (queried live by GBLaunchAtLogin), but we also mirror
+// lives in SMAppService (queried live), but we also mirror
 // it here so the preference is migratable across a future bundle-identifier
 // change — the way the device preference is.
 static NSString* const kPrefLaunchAtLogin = @"LaunchAtLogin";
@@ -75,7 +57,6 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
     AudioLock* outputLock;
     BOOL menuOpen;
     BOOL screenLocked;
-    NSWindow* aboutWindow;
     // Shared listener block for all three CoreAudio property listeners.
     AudioObjectPropertyListenerBlock deviceChangeListener;
 }
@@ -151,10 +132,11 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
     // the last rename that can lose it.
     id legacyLaunchAtLogin = (__bridge_transfer id)CFPreferencesCopyAppValue(
         (__bridge CFStringRef)kPrefLaunchAtLogin, legacyID);
-    if ( [legacyLaunchAtLogin boolValue] && ![GBLaunchAtLogin isLoginItem] )
+    SMAppService *loginItem = [SMAppService mainAppService];
+    if ( [legacyLaunchAtLogin boolValue] && loginItem.status != SMAppServiceStatusEnabled )
     {
         NSError *error = nil;
-        if ( [GBLaunchAtLogin addAppAsLoginItem:&error] )
+        if ( [loginItem registerAndReturnError:&error] )
         {
             [prefs setBool:YES forKey:kPrefLaunchAtLogin];
         }
@@ -613,8 +595,9 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
 
     NSMenuItem *startupItem = [ self addItemTo : target title : @"Open at Login" action : @selector(toggleStartupItem) symbol : @"power" ];
     // Mixed (a dash) when registered but switched off in System Settings.
-    startupItem.state = [ GBLaunchAtLogin isLoginItem ] ? NSControlStateValueOn
-                      : [ GBLaunchAtLogin loginItemRequiresApproval ] ? NSControlStateValueMixed
+    SMAppServiceStatus loginStatus = [ SMAppService mainAppService ].status;
+    startupItem.state = ( loginStatus == SMAppServiceStatusEnabled ) ? NSControlStateValueOn
+                      : ( loginStatus == SMAppServiceStatusRequiresApproval ) ? NSControlStateValueMixed
                       : NSControlStateValueOff;
 
     for ( AudioLock *lock in self.locks )
@@ -842,14 +825,15 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
 
 - ( void ) toggleStartupItem
 {
+    SMAppService *loginItem = [ SMAppService mainAppService ];
     NSError *error = nil;
     BOOL ok;
 
-    if ( [ GBLaunchAtLogin isLoginItem ] )
+    if ( loginItem.status == SMAppServiceStatusEnabled )
     {
-        ok = [ GBLaunchAtLogin removeAppFromLoginItems : &error ];
+        ok = [ loginItem unregisterAndReturnError : &error ];
     }
-    else if ( [ GBLaunchAtLogin loginItemRequiresApproval ] )
+    else if ( loginItem.status == SMAppServiceStatusRequiresApproval )
     {
         // Registered, but switched off in System Settings. Only the user can
         // turn it back on there.
@@ -858,18 +842,18 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
     }
     else
     {
-        ok = [ GBLaunchAtLogin addAppAsLoginItem : &error ];
+        ok = [ loginItem registerAndReturnError : &error ];
     }
 
     // Mirror the resulting state into preferences so it survives a future
     // bundle-identifier change (see migrateSettingsFromLegacyBundleIfNeeded).
-    [ [ NSUserDefaults standardUserDefaults ] setBool : [ GBLaunchAtLogin isLoginItem ]
+    [ [ NSUserDefaults standardUserDefaults ] setBool : ( loginItem.status == SMAppServiceStatusEnabled )
                                                forKey : kPrefLaunchAtLogin ];
 
     if ( !ok )
     {
         LAError("Changing login item failed: %{public}@", error );
-        if ( [ GBLaunchAtLogin loginItemRequiresApproval ] )
+        if ( loginItem.status == SMAppServiceStatusRequiresApproval )
         {
             [ self showLoginItemNeedsApprovalAlert ];
         }
@@ -939,155 +923,55 @@ typedef NS_ENUM(NSUInteger, StatusIconState) {
     [ self activateApp ];
     if ( [ alert runModal ] == NSAlertFirstButtonReturn )
     {
-        [ GBLaunchAtLogin openLoginItemsSettings ];
+        [ SMAppService openSystemSettingsLoginItems ];
     }
 }
 
 
 #pragma mark - About
 
+// The system About panel: icon, name and the copyright line come from the
+// bundle; the links go in its credits area.
 - ( void ) showAbout
 {
-    if (aboutWindow == nil) {
-        aboutWindow = [self buildAboutWindow];
+    NSMutableParagraphStyle *centered = [ [ NSMutableParagraphStyle alloc ] init ];
+    centered.alignment = NSTextAlignmentCenter;
+    NSMutableAttributedString *credits = [ [ NSMutableAttributedString alloc ] init ];
+    NSArray<NSArray<NSString*>*> *links = @[
+        @[ @"https://www.lockaudio.com", @"https://www.lockaudio.com" ],
+        @[ @"https://github.com/jstilwell/LockAudio", @"https://github.com/jstilwell/LockAudio" ],
+        @[ @"jesse@stilwe.com", @"mailto:jesse@stilwe.com" ],
+        @[ @"https://stilwe.com", @"https://stilwe.com" ],
+    ];
+    for ( NSArray<NSString*> *link in links )
+    {
+        [ credits appendAttributedString : [ [ NSAttributedString alloc ]
+            initWithString : [ link[0] stringByAppendingString : @"\n" ]
+                attributes : @{
+                    NSLinkAttributeName : [ NSURL URLWithString : link[1] ],
+                    NSFontAttributeName : [ NSFont systemFontOfSize : 12 ],
+                    NSParagraphStyleAttributeName : centered,
+                } ] ];
     }
-    [ self activateApp ];
 
-    [aboutWindow center];
-    [aboutWindow makeKeyAndOrderFront:nil];
+    [ self activateApp ];
+    [ NSApp orderFrontStandardAboutPanelWithOptions : @{
+        NSAboutPanelOptionCredits : credits,
+        // Empty build version: show "Version 2.1.1", not "Version 2.1.1 (2.1.1)".
+        NSAboutPanelOptionVersion : @"",
+    } ];
+
     // On macOS 14+ activation is only a request: it can land late or be
     // declined (the menu is still closing when this runs), which left the
-    // window behind the frontmost app. Bring it forward regardless; it becomes
-    // key once the app activates or the user clicks it.
-    [aboutWindow orderFrontRegardless];
-}
-
-- (NSWindow *)buildAboutWindow
-{
-    CGFloat W = 460;
-    CGFloat H = 330;
-    NSRect frame = NSMakeRect(0, 0, W, H);
-    NSWindow *window = [[NSWindow alloc]
-        initWithContentRect:frame
-                  styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable)
-                    backing:NSBackingStoreBuffered
-                      defer:NO];
-    window.title = @"";
-    window.releasedWhenClosed = NO;
-    window.titlebarAppearsTransparent = YES;
-
-    NSView *content = window.contentView;
-
-    // App icon
-    CGFloat iconSize = 96;
-    NSImage *iconImage = [NSImage imageNamed:@"AppIcon"] ?: NSApp.applicationIconImage;
-    NSImageView *iconView = [[NSImageView alloc] initWithFrame:NSMakeRect((W - iconSize) / 2, H - 28 - iconSize, iconSize, iconSize)];
-    iconView.image = iconImage;
-    iconView.imageScaling = NSImageScaleProportionallyUpOrDown;
-    [content addSubview:iconView];
-
-    // App name
-    NSTextField *nameLabel = [NSTextField labelWithString:@"LockAudio"];
-    nameLabel.font = [NSFont systemFontOfSize:22 weight:NSFontWeightBold];
-    nameLabel.alignment = NSTextAlignmentCenter;
-    nameLabel.frame = NSMakeRect(0, H - 160, W, 28);
-    [content addSubview:nameLabel];
-
-    // Version
-    NSString *version = [[NSBundle mainBundle] infoDictionary][@"CFBundleShortVersionString"];
-    NSTextField *versionLabel = [NSTextField labelWithString:[NSString stringWithFormat:@"Version %@", version]];
-    versionLabel.font = [NSFont systemFontOfSize:12];
-    versionLabel.textColor = [NSColor secondaryLabelColor];
-    versionLabel.alignment = NSTextAlignmentCenter;
-    versionLabel.frame = NSMakeRect(0, H - 182, W, 18);
-    [content addSubview:versionLabel];
-
-    // Links — URLs verbatim, centered
-    NSArray *links = @[
-        @[@"https://www.lockaudio.com", @"https://www.lockaudio.com"],
-        @[@"https://github.com/jstilwell/LockAudio", @"https://github.com/jstilwell/LockAudio"],
-        @[@"jesse@stilwe.com", @"mailto:jesse@stilwe.com"],
-    ];
-    CGFloat linksTop = H - 215;
-    CGFloat linkHeight = 20;
-    CGFloat linkSpacing = 2;
-    for (NSUInteger i = 0; i < links.count; i++) {
-        CGFloat y = linksTop - (i * (linkHeight + linkSpacing));
-        NSView *linkView = [self linkViewWithTitle:links[i][0]
-                                                url:links[i][1]
-                                              frame:NSMakeRect(20, y, W - 40, linkHeight)];
-        [content addSubview:linkView];
+    // window behind the frontmost app. Bring the panel forward regardless; it
+    // becomes key once the app activates or the user clicks it.
+    for ( NSWindow *window in NSApp.windows )
+    {
+        if ( window.visible && [ window isMemberOfClass : [ NSPanel class ] ] )
+        {
+            [ window orderFrontRegardless ];
+        }
     }
-
-    // Copyright, with the holder's name linking to its site
-    NSString *copyright = [[NSBundle mainBundle] infoDictionary][@"NSHumanReadableCopyright"] ?: @"";
-    NSRect copyrightFrame = NSMakeRect(20, 36, W - 40, 16);
-    NSMutableParagraphStyle *centered = [[NSMutableParagraphStyle alloc] init];
-    centered.alignment = NSTextAlignmentCenter;
-    NSMutableAttributedString *copyrightText = [[NSMutableAttributedString alloc] initWithString:copyright
-        attributes:@{
-            NSFontAttributeName: [NSFont systemFontOfSize:11],
-            NSForegroundColorAttributeName: [NSColor tertiaryLabelColor],
-            NSParagraphStyleAttributeName: centered,
-        }];
-    NSRange holder = [copyright rangeOfString:kCopyrightHolder];
-
-    NSTextField *copyrightLabel = [NSTextField labelWithString:@""];
-    copyrightLabel.alignment = NSTextAlignmentCenter;
-    if (holder.location == NSNotFound) {
-        copyrightLabel.attributedStringValue = copyrightText;
-        copyrightLabel.frame = copyrightFrame;
-        [content addSubview:copyrightLabel];
-    } else {
-        [copyrightText addAttributes:@{
-            NSForegroundColorAttributeName: [NSColor linkColor],
-            NSLinkAttributeName: [NSURL URLWithString:kCopyrightHolderURL],
-        } range:holder];
-        copyrightLabel.selectable = YES;
-        copyrightLabel.allowsEditingTextAttributes = YES;
-        copyrightLabel.attributedStringValue = copyrightText;
-        copyrightLabel.frame = NSMakeRect(0, 0, copyrightFrame.size.width, copyrightFrame.size.height);
-
-        // Hand cursor over the holder's name only: the text is centered, so
-        // offset by half the slack plus the width of the text before it.
-        CGFloat fullWidth = copyrightText.size.width;
-        CGFloat prefixWidth = [copyrightText attributedSubstringFromRange:NSMakeRange(0, holder.location)].size.width;
-        CGFloat holderWidth = [copyrightText attributedSubstringFromRange:holder].size.width;
-        LinkCursorView *wrapper = [[LinkCursorView alloc] initWithFrame:copyrightFrame];
-        wrapper.linkRect = NSMakeRect(floor((copyrightFrame.size.width - fullWidth) / 2 + prefixWidth), 0,
-                                      ceil(holderWidth), copyrightFrame.size.height);
-        [wrapper addSubview:copyrightLabel];
-        [content addSubview:wrapper];
-    }
-
-    return window;
-}
-
-- (NSView *)linkViewWithTitle:(NSString *)title url:(NSString *)url frame:(NSRect)frame
-{
-    NSMutableParagraphStyle *centered = [[NSMutableParagraphStyle alloc] init];
-    centered.alignment = NSTextAlignmentCenter;
-
-    NSAttributedString *attr = [[NSAttributedString alloc] initWithString:title
-        attributes:@{
-            NSFontAttributeName: [NSFont systemFontOfSize:12],
-            NSForegroundColorAttributeName: [NSColor linkColor],
-            NSLinkAttributeName: [NSURL URLWithString:url],
-            NSParagraphStyleAttributeName: centered,
-        }];
-
-    NSTextField *field = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, frame.size.width, frame.size.height)];
-    field.editable = NO;
-    field.bordered = NO;
-    field.drawsBackground = NO;
-    field.selectable = YES;
-    field.allowsEditingTextAttributes = YES;
-    field.alignment = NSTextAlignmentCenter;
-    field.attributedStringValue = attr;
-
-    LinkCursorView *wrapper = [[LinkCursorView alloc] initWithFrame:frame];
-    [wrapper addSubview:field];
-    return wrapper;
 }
 
 
